@@ -4,6 +4,12 @@
 
 ## Unreleased - ReleaseDate
 
+## 0.12.1 - 2024-05-09 - Unity release
+
+### Features
+
+ - Release `usamply` customized for Unity
+
 ## 0.12.0 - 2024-04-16
 
 ### Breaking changes
