@@ -11,7 +11,8 @@ members = [
     "wholesym-addr2line",
     "tools/benchmarks",
     "tools/dump_table",
-    "tools/query_api"
+    "tools/query_api",
+    "pdb2"
 ]
 exclude = ["etw-reader"] # Should not be compiled on non-Windows
 
