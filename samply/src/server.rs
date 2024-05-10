@@ -89,7 +89,9 @@ async fn start_server(
         let env_profiler_override = std::env::var("PROFILER_URL").ok();
         let profiler_origin = match &env_profiler_override {
             Some(s) => s.trim_end_matches('/'),
-            None => "https://profiler.firefox.com",
+            //None => "https://profiler.firefox.com",
+            // At some point a real URL
+            None => "https://profiler-dot-unity-eng-arch-dev.uw.r.appspot.com/",
         };
 
         let encoded_profile_url = utf8_percent_encode(&profile_url, BAD_CHARS).to_string();
