@@ -816,6 +816,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "getopts"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1402,9 +1411,19 @@ dependencies = [
  "bitflags 2.5.0",
  "elsa",
  "maybe-owned",
- "pdb2",
+ "pdb2 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "range-collections",
  "thiserror",
+]
+
+[[package]]
+name = "pdb2"
+version = "0.9.0"
+dependencies = [
+ "fallible-iterator 0.2.0",
+ "getopts",
+ "scroll",
+ "uuid",
 ]
 
 [[package]]
@@ -1824,65 +1843,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "samply"
-version = "0.12.0"
-dependencies = [
- "bitflags 2.5.0",
- "byteorder",
- "cfg-if",
- "clap",
- "crossbeam-channel",
- "ctrlc",
- "debugid",
- "dirs",
- "env_logger",
- "etw-reader",
- "flate2",
- "framehop",
- "futures-util",
- "fxhash",
- "fxprof-processed-profile",
- "http-body-util",
- "hyper",
- "hyper-util",
- "lazy_static",
- "libc",
- "linux-perf-data",
- "log",
- "mach",
- "memchr",
- "memmap2",
- "memoffset",
- "mio",
- "nix",
- "nix-base32",
- "num-derive",
- "num-traits",
- "num_cpus",
- "object 0.35.0",
- "once_cell",
- "opener",
- "parking_lot",
- "percent-encoding",
- "rand",
- "rangemap",
- "runas",
- "serde",
- "serde_derive",
- "serde_json",
- "sysctl",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-util",
- "uname",
- "uuid",
- "which 6.0.1",
- "wholesym",
- "windows",
 ]
 
 [[package]]
@@ -2396,6 +2356,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unicode-width"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68f5e5f3158ecfd4b8ff6fe086db7c8467a2dfdac97fe420f2b7c4aa97af66d6"
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2410,6 +2376,65 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+]
+
+[[package]]
+name = "usamply"
+version = "0.12.0"
+dependencies = [
+ "bitflags 2.5.0",
+ "byteorder",
+ "cfg-if",
+ "clap",
+ "crossbeam-channel",
+ "ctrlc",
+ "debugid",
+ "dirs",
+ "env_logger",
+ "etw-reader",
+ "flate2",
+ "framehop",
+ "futures-util",
+ "fxhash",
+ "fxprof-processed-profile",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "lazy_static",
+ "libc",
+ "linux-perf-data",
+ "log",
+ "mach",
+ "memchr",
+ "memmap2",
+ "memoffset",
+ "mio",
+ "nix",
+ "nix-base32",
+ "num-derive",
+ "num-traits",
+ "num_cpus",
+ "object 0.35.0",
+ "once_cell",
+ "opener",
+ "parking_lot",
+ "percent-encoding",
+ "rand",
+ "rangemap",
+ "runas",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "sysctl",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "uname",
+ "uuid",
+ "which 6.0.1",
+ "wholesym",
+ "windows",
 ]
 
 [[package]]

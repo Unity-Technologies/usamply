@@ -1,11 +1,11 @@
 [package]
-name = "samply"
+name = "usamply"
 version = "0.12.0"
 authors = ["Markus Stange <mstange@themasta.com>"]
 edition = "2021"
 rust-version = "1.74" # needed by clap and wholesym
 license = "MIT OR Apache-2.0"
-description = "A command line profiler for macOS and Linux."
+description = "A command line profiler for macOS and Linux. (usamply customized from samply)"
 repository = "https://github.com/mstange/samply/"
 readme = "README.md"
 
