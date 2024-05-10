@@ -6,7 +6,6 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 rust-version = "1.67" # needed by yoke
 description = "Symbolication utilities for the Firefox profiler."
-repository = "https://github.com/mstange/samply/"
 readme = "README.md"
 
 [features]

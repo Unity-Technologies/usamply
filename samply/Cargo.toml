@@ -1,12 +1,12 @@
 [package]
 name = "usamply"
-version = "0.12.0-unity.2"
-authors = ["Markus Stange <mstange@themasta.com>"]
+version = "0.12.1"
+authors = ["Markus Stange <mstange@themasta.com>", "Vladimir Vukicevic <vladimir@pobox.com>"]
 edition = "2021"
 rust-version = "1.74" # needed by clap and wholesym
 license = "MIT OR Apache-2.0"
 description = "A command line profiler for macOS and Linux. (usamply customized from samply)"
-repository = "https://github.com/mstange/samply/"
+repository = "https://github.com/Unity-Technologies/usamply/"
 readme = "README.md"
 
 [dependencies]

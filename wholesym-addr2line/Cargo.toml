@@ -7,7 +7,6 @@ rust-version = "1.61"
 description = "A command line binary with addr2line-compatible UI, using wholesym"
 readme = "README.md"
 homepage = "https://github.com/mstange/samply/tree/main/wholesym-addr2line"
-repository = "https://github.com/mstange/samply"
 license = "MIT OR Apache-2.0"
 keywords = ["symbols", "profiling", "addr2line", "debuginfo"]
 
