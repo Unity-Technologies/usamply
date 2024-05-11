@@ -36,13 +36,30 @@ pub fn start_recording(
     };
 
     let ProcessLaunchProps {
-        env_vars,
+        mut env_vars,
         command_name,
         args,
         iteration_count,
     } = process_launch_props;
     let command_name_copy = command_name.to_string_lossy().to_string();
     let output_file = recording_props.output_file.clone();
+
+    let mut unlink_aux_files = profile_creation_props.unlink_aux_files;
+    if recording_props.coreclr {
+        // We need to set DOTNET_PerfMapEnabled=2 in the environment if it's not already set.
+        // If we set it, we'll also set unlink_aux_files=true to avoid leaving files
+        // behind in the temp directory. But if it's set manually, assume the user
+        // knows what they're doing and will specify the arg as needed.
+        if !env_vars.iter().any(|p| p.0 == "DOTNET_PerfMapEnabled") {
+            env_vars.push(("DOTNET_PerfMapEnabled".into(), "2".into()));
+            unlink_aux_files = true;
+        }
+    }
+
+    let profile_creation_props = ProfileCreationProps {
+        unlink_aux_files,
+        ..profile_creation_props
+    };
 
     let (task_sender, task_receiver) = unbounded();
 

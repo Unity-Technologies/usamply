@@ -176,8 +176,7 @@ struct RecordArgs {
     #[arg(short, long, conflicts_with = "pid")]
     all: bool,
 
-    /// Enable CoreCLR event capture (Windows only).
-    #[cfg(target_os = "windows")]
+    /// Enable CoreCLR event capture.
     #[arg(long)]
     coreclr: bool,
 
@@ -379,9 +378,9 @@ impl RecordArgs {
         let interval = Duration::from_secs_f64(1.0 / self.rate);
         cfg_if::cfg_if! {
             if #[cfg(target_os = "windows")] {
-                let (coreclr, vm_hack) = (self.coreclr, self.vm_hack);
+                let vm_hack = self.vm_hack;
             } else {
-                let (coreclr, vm_hack) = (false, false);
+                let vm_hack = false;
             }
         }
         RecordingProps {
@@ -389,7 +388,7 @@ impl RecordArgs {
             time_limit,
             interval,
             main_thread_only: self.main_thread_only,
-            coreclr,
+            coreclr: self.coreclr,
             vm_hack,
         }
     }
