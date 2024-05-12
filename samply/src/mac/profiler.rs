@@ -28,7 +28,7 @@ pub fn start_recording(
 ) -> Result<ExitStatus, MachError> {
     let mut unlink_aux_files = profile_creation_props.unlink_aux_files;
     let output_file = recording_props.output_file.clone();
-    let mut profile_name: String = "".to_owned();
+    let profile_name;
 
     let mut task_accepter = TaskAccepter::new()?;
 
@@ -113,12 +113,12 @@ pub fn start_recording(
             }
             let timeout = Duration::from_secs_f64(1.0);
             match task_accepter.next_message(timeout) {
-                Ok(ReceivedStuff::AcceptedTask(mut accepted_task)) => {
+                Ok(ReceivedStuff::AcceptedTask(accepted_task)) => {
                     let pid = accepted_task.get_id();
                     let (path_sender, path_receiver) = unbounded();
                     let send_result = task_sender.send(TaskInitOrShutdown::TaskInit(TaskInit {
                         start_time_mono: get_monotonic_timestamp(),
-                        task: accepted_task.take_task(),
+                        task: accepted_task.task(),
                         pid,
                         path_receiver,
                     }));
