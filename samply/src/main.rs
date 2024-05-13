@@ -189,6 +189,10 @@ struct RecordArgs {
     #[cfg(target_os = "windows")]
     #[arg(long)]
     vm_hack: bool,
+
+    /// Enable Graphics-related event capture.
+    #[arg(long)]
+    gfx: bool,
 }
 
 #[derive(Debug, Args)]
@@ -396,6 +400,7 @@ impl RecordArgs {
             coreclr: self.coreclr,
             coreclr_allocs,
             vm_hack,
+            gfx: self.gfx,
         }
     }
 

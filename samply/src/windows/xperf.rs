@@ -56,6 +56,11 @@ impl Xperf {
             &self.recording_mode,
         ));
 
+        user_providers.append(&mut super::gfx::gfx_xperf_args(
+            &self.recording_props,
+            &self.recording_mode,
+        ));
+
         // start xperf.exe, logging to the same location as the output file, just with a .etl
         // extension.
         let mut kernel_etl_file = expand_full_filename_with_cwd(output_file);
