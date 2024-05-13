@@ -1,6 +1,6 @@
 [package]
 name = "usamply"
-version = "0.12.2"
+version = "0.12.3"
 authors = ["Markus Stange <mstange@themasta.com>", "Vladimir Vukicevic <vladimir@pobox.com>"]
 edition = "2021"
 rust-version = "1.74" # needed by clap and wholesym
