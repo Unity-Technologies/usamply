@@ -394,7 +394,7 @@ impl RecordArgs {
             interval,
             main_thread_only: self.main_thread_only,
             coreclr: self.coreclr,
-            coreclr_allocs: self.coreclr_allocs,
+            coreclr_allocs,
             vm_hack,
         }
     }
