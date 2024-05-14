@@ -14,6 +14,7 @@ use object::FileFlags;
 use uuid::Uuid;
 
 use crate::mapped_path::MappedPath;
+use crate::symbol_map::SymbolMapTrait;
 
 pub type FileAndPathHelperError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type FileAndPathHelperResult<T> = std::result::Result<T, FileAndPathHelperError>;
@@ -402,6 +403,18 @@ pub trait FileAndPathHelper {
         &self,
         location: Self::FL,
     ) -> std::pin::Pin<Box<dyn OptionallySendFuture<Output = FileAndPathHelperResult<Self::F>> + '_>>;
+
+    /// Ask the helper to return a SymbolMap if it happens to have one available already.
+    fn get_symbol_map_for_library(
+        &self,
+        _info: &LibraryInfo,
+    ) -> Option<(Self::FL, Box<dyn SymbolMapTrait + Send + Sync>)> {
+        None
+    }
+
+    fn has_precog_data_for_testing_only(&self) -> bool {
+        false
+    }
 }
 
 /// Provides synchronous access to the raw bytes of a file.

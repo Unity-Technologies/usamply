@@ -151,6 +151,7 @@ fn profile_without_js() {
                 name: "libc_symbol_2".to_string(),
             },
         ]))),
+        seen_rvas: None,
     });
     profile.add_lib_mapping(
         process,
@@ -168,6 +169,7 @@ fn profile_without_js() {
         debug_id: DebugId::from_breakpad("5C0A0D51EA1980DF43F203B4525BE9BE0").unwrap(),
         arch: None,
         symbol_table: None,
+        seen_rvas: None,
     });
     profile.add_lib_mapping(
         process,

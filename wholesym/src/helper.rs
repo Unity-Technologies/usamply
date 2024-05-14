@@ -8,6 +8,7 @@ use debugid::DebugId;
 use samply_symbols::{
     BreakpadIndex, BreakpadIndexParser, CandidatePathInfo, CodeId, ElfBuildId, FileAndPathHelper,
     FileAndPathHelperResult, FileLocation, LibraryInfo, OptionallySendFuture, PeCodeId,
+    SymbolMapTrait,
 };
 use symsrv::{SymsrvDownloader, SymsrvObserver};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -237,6 +238,15 @@ impl FileAndPathHelper for FileReadOnlyHelper {
         Ok(get_dyld_shared_cache_paths(arch))
     }
 }
+
+pub trait PrecogHelper {
+    fn lookup_lib(
+        &self,
+        debug_id: &str,
+    ) -> Option<Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>>;
+}
+
+pub trait PrecogHelperTrait: PrecogHelper + std::fmt::Debug + Sync + Send {}
 
 pub struct Helper {
     symsrv_downloader: Option<SymsrvDownloader>,
@@ -896,6 +906,32 @@ impl FileAndPathHelper for Helper {
         }
 
         Ok(paths)
+    }
+
+    fn get_symbol_map_for_library(
+        &self,
+        info: &LibraryInfo,
+    ) -> Option<(Self::FL, Box<dyn SymbolMapTrait + Send + Sync>)> {
+        if let Some(precog_helper) = self.config.precog_helper.as_ref() {
+            precog_helper
+                .lookup_lib(&info.debug_id.unwrap_or_default().to_string())
+                .map(|l| {
+                    let location = WholesymFileLocation::LocalFile(
+                        info.debug_path
+                            .as_ref()
+                            .map(|p| p.clone())
+                            .unwrap_or_else(|| "UNKNOWN".to_string())
+                            .into(),
+                    );
+                    (location, l)
+                })
+        } else {
+            None
+        }
+    }
+
+    fn has_precog_data_for_testing_only(&self) -> bool {
+        self.config.precog_helper.is_some()
     }
 }
 

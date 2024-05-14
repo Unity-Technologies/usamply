@@ -21,7 +21,9 @@ use tokio_util::io::ReaderStream;
 use wholesym::debugid::DebugId;
 use wholesym::{LibraryInfo, SymbolManager, SymbolManagerConfig};
 
+use crate::shared;
 use crate::shared::ctrl_c::CtrlC;
+use crate::shared::symbol_precog::PrecogSymbolInfo;
 
 #[derive(Clone, Debug)]
 pub struct ServerProps {
@@ -114,6 +116,25 @@ async fn start_server(
         .respect_nt_symbol_path(true)
         .use_debuginfod(std::env::var("SAMPLY_USE_DEBUGINFOD").is_ok())
         .use_spotlight(true);
+
+    if let Some(profile_filename) = profile_filename {
+        let precog_filename = profile_filename.with_file_name(format!(
+            "{}_symbols.json",
+            profile_filename.file_name().unwrap().to_string_lossy()
+        ));
+        let precog_helper = shared::symbol_precog::PrecogSymbolInfo::try_load(&precog_filename)
+            .map(|f| {
+                let f = Box::new(f);
+                let static_f: &'static mut PrecogSymbolInfo = Box::leak(f);
+
+                unsafe {
+                    Box::from_raw(static_f as *mut PrecogSymbolInfo)
+                        as Box<dyn wholesym::PrecogHelperTrait>
+                }
+            });
+        config = config.set_precog_helper(precog_helper);
+    }
+
     if let Some(home_dir) = dirs::home_dir() {
         config = config.debuginfod_cache_dir_if_not_installed(home_dir.join("sym"));
     }
@@ -126,6 +147,7 @@ async fn start_server(
     for lib_info in libinfo_map.into_values() {
         symbol_manager.add_known_library(lib_info);
     }
+
     let symbol_manager = Arc::new(symbol_manager);
 
     let server = tokio::task::spawn(run_server(

@@ -3,10 +3,12 @@ use std::path::PathBuf;
 
 use symsrv::{parse_nt_symbol_path, NtSymbolPathEntry};
 
+use crate::helper::PrecogHelperTrait;
+
 /// The configuration of a [`SymbolManager`](crate::SymbolManager).
 ///
 /// Allows specifying various sources of symbol files.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct SymbolManagerConfig {
     pub(crate) verbose: bool,
     pub(crate) redirect_paths: HashMap<PathBuf, PathBuf>,
@@ -20,6 +22,7 @@ pub struct SymbolManagerConfig {
     pub(crate) use_spotlight: bool,
     pub(crate) debuginfod_cache_dir_if_not_installed: Option<PathBuf>,
     pub(crate) debuginfod_servers: Vec<(String, PathBuf)>,
+    pub(crate) precog_helper: Option<Box<dyn PrecogHelperTrait + 'static>>,
 }
 
 impl SymbolManagerConfig {
@@ -172,6 +175,11 @@ impl SymbolManagerConfig {
     /// of dSYM files based on a mach-O UUID. Ignored on non-macOS.
     pub fn use_spotlight(mut self, use_spotlight: bool) -> Self {
         self.use_spotlight = use_spotlight;
+        self
+    }
+
+    pub fn set_precog_helper(mut self, precog_helper: Option<Box<dyn PrecogHelperTrait>>) -> Self {
+        self.precog_helper = precog_helper;
         self
     }
 }

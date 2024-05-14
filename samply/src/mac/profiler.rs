@@ -203,6 +203,14 @@ pub fn start_recording(
         }
     };
 
+    crate::shared::symbol_precog::presymbolicate(
+        &profile,
+        &output_file.with_file_name(format!(
+            "{}_syms",
+            output_file.file_name().unwrap().to_string_lossy()
+        )),
+    );
+
     {
         // Write the profile to a file.
         let file = File::create(&output_file).unwrap();
