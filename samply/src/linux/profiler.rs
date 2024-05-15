@@ -542,6 +542,7 @@ fn run_profiler(
     more_processes_request_receiver: Receiver<SamplerRequest>,
     more_processes_reply_sender: Sender<bool>,
     mut stop_receiver: oneshot::Receiver<()>,
+    unstable_presymbolicate: bool,
 ) {
     // eprintln!("Running...");
 
@@ -667,9 +668,18 @@ fn run_profiler(
 
     let profile = converter.finish();
 
-    let output_file = File::create(output_filename).unwrap();
-    let writer = BufWriter::new(output_file);
-    serde_json::to_writer(writer, &profile).expect("Couldn't write JSON");
+    {
+        let output_file = File::create(output_filename).unwrap();
+        let writer = BufWriter::new(output_file);
+        serde_json::to_writer(writer, &profile).expect("Couldn't write JSON");
+    }
+
+    if unstable_presymbolicate {
+        crate::shared::symbol_precog::presymbolicate(
+            &profile,
+            &output_filename.with_extension("syms.json"),
+        );
+    }
 }
 
 pub fn read_string_lossy<P: AsRef<Path>>(path: P) -> std::io::Result<String> {
