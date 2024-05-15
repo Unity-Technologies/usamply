@@ -921,10 +921,6 @@ impl FileAndPathHelper for Helper {
                 (location, symbol_map.clone())
             })
     }
-
-    fn has_precog_data_for_testing_only(&self) -> bool {
-        self.config.precog_data.is_some()
-    }
 }
 
 /// Return a Vec containing the potential paths where a dyld shared cache

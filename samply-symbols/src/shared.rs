@@ -412,10 +412,6 @@ pub trait FileAndPathHelper {
     ) -> Option<(Self::FL, Arc<dyn SymbolMapTrait + Send + Sync>)> {
         None
     }
-
-    fn has_precog_data_for_testing_only(&self) -> bool {
-        false
-    }
 }
 
 /// Provides synchronous access to the raw bytes of a file.
