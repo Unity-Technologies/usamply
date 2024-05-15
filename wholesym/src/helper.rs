@@ -903,9 +903,7 @@ impl FileAndPathHelper for Helper {
         &self,
         info: &LibraryInfo,
     ) -> Option<(Self::FL, Arc<dyn SymbolMapTrait + Send + Sync>)> {
-        let Some(precog_data) = self.config.precog_data.as_ref() else {
-            return None;
-        };
+        let precog_data = self.config.precog_data.as_ref()?;
 
         precog_data
             .precog_data
@@ -913,8 +911,7 @@ impl FileAndPathHelper for Helper {
             .map(|symbol_map| {
                 let location = WholesymFileLocation::LocalFile(
                     info.debug_path
-                        .as_ref()
-                        .map(|p| p.clone())
+                        .clone()
                         .unwrap_or_else(|| "UNKNOWN".to_string())
                         .into(),
                 );

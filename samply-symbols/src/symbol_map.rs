@@ -57,7 +57,7 @@ impl<H: FileAndPathHelper> SymbolMap<H> {
         inner: Box<dyn GetInnerSymbolMap + Send + Sync>,
     ) -> Self {
         Self {
-            debug_file_location: debug_file_location,
+            debug_file_location,
             inner: InnerSymbolMap::WithoutAddFile(inner),
             helper: None,
         }
@@ -69,7 +69,7 @@ impl<H: FileAndPathHelper> SymbolMap<H> {
         helper: Arc<H>,
     ) -> Self {
         Self {
-            debug_file_location: debug_file_location,
+            debug_file_location,
             inner: InnerSymbolMap::WithAddFile(inner),
             helper: Some(helper),
         }

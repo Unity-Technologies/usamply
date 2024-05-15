@@ -212,10 +212,7 @@ impl<'de> Deserialize<'de> for PrecogSymbolInfo {
                 for lib in &mut data {
                     lib.string_table = Some(string_table.clone());
                 }
-                Ok(PrecogSymbolInfo {
-                    string_table: string_table,
-                    data: data,
-                })
+                Ok(PrecogSymbolInfo { string_table, data })
             }
         }
 
@@ -323,7 +320,7 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
             name: Some(lib.debug_name.clone()),
             path: Some(lib.path.clone()),
             debug_path: Some(lib.debug_path.clone()),
-            debug_id: Some(lib.debug_id.clone()),
+            debug_id: Some(lib.debug_id),
             arch: lib.arch.clone(),
             debug_name: Some(lib.debug_name.clone()),
             code_id: lib
