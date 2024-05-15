@@ -118,10 +118,7 @@ async fn start_server(
         .use_spotlight(true);
 
     if let Some(profile_filename) = profile_filename {
-        let precog_filename = profile_filename.with_file_name(format!(
-            "{}_symbols.json",
-            profile_filename.file_name().unwrap().to_string_lossy()
-        ));
+        let precog_filename = profile_filename.with_extension("syms.json");
         let precog_helper = shared::symbol_precog::PrecogSymbolInfo::try_load(&precog_filename)
             .map(|f| {
                 let f = Box::new(f);
@@ -129,7 +126,7 @@ async fn start_server(
 
                 unsafe {
                     Box::from_raw(static_f as *mut PrecogSymbolInfo)
-                        as Box<dyn wholesym::PrecogHelperTrait>
+                        as Box<dyn wholesym::PrecogLibrarySymbolsHelperTrait>
                 }
             });
         config = config.set_precog_helper(precog_helper);

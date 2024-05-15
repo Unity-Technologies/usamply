@@ -314,7 +314,9 @@ where
 
         // FOR TESTING ONLY
         // If we have precog data, only use the precog data for search
-        //if self.helper().as_ref().has_precog_data_for_testing_only() { return Err(Error::NotEnoughInformationToIdentifySymbolMap); }
+        //if self.helper().as_ref().has_precog_data_for_testing_only() {
+        //    return Err(Error::NotEnoughInformationToIdentifySymbolMap);
+        //}
 
         let debug_id = match library_info.debug_id {
             Some(debug_id) => debug_id,

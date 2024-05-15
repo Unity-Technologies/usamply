@@ -239,14 +239,21 @@ impl FileAndPathHelper for FileReadOnlyHelper {
     }
 }
 
-pub trait PrecogHelper {
+/// A trait that provides access to full symbol information for specific addresses
+/// without having to go through the debug info, i.e. if a profile capture's frame addresses
+/// are presymbolicated. This is an interim solution until the profile format is extended
+/// to optionally include full information (file/line numbers, inline frames, etc.).
+pub trait PrecogLibrarySymbolsHelper {
     fn lookup_lib(
         &self,
         debug_id: &str,
     ) -> Option<Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>>;
 }
 
-pub trait PrecogHelperTrait: PrecogHelper + std::fmt::Debug + Sync + Send {}
+pub trait PrecogLibrarySymbolsHelperTrait:
+    PrecogLibrarySymbolsHelper + std::fmt::Debug + Sync + Send
+{
+}
 
 pub struct Helper {
     symsrv_downloader: Option<SymsrvDownloader>,

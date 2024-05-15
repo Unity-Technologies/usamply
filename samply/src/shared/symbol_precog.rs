@@ -1,29 +1,19 @@
 use std::fs::File;
 use std::io::BufWriter;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
-use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    ser::SerializeMap, ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer,
+};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::to_writer;
-use wholesym::PrecogHelper;
+use wholesym::PrecogLibrarySymbolsHelper;
 
-// so many string tables, none of them convenient
-struct StringTable {
-    string_map: HashMap<String, usize>,
-    strings: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
-//struct StringTableIndex(usize);
-struct StringTableIndex(String);
-
-impl StringTableIndex {
-    fn unknown() -> StringTableIndex {
-        //StringTableIndex(0)
-        StringTableIndex("UNKNOWN".to_owned())
-    }
-}
+#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+struct StringTableIndex(usize);
+//struct StringTableIndex(String);
 
 impl Serialize for StringTableIndex {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -34,9 +24,22 @@ impl Serialize for StringTableIndex {
 impl<'de> Deserialize<'de> for StringTableIndex {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = String::deserialize(deserializer)?;
-        //Ok(StringTableIndex(usize::from_str(&value).unwrap()))
-        Ok(StringTableIndex(value))
+        Ok(StringTableIndex(usize::from_str(&value).unwrap()))
+        //Ok(StringTableIndex(value))
     }
+}
+
+impl StringTableIndex {
+    fn unknown() -> StringTableIndex {
+        StringTableIndex(0)
+        //StringTableIndex("UNKNOWN".to_owned())
+    }
+}
+
+// so many string tables, none of them convenient
+struct StringTable {
+    string_map: HashMap<String, usize>,
+    strings: Vec<String>,
 }
 
 impl StringTable {
@@ -45,12 +48,12 @@ impl StringTable {
             string_map: HashMap::new(),
             strings: Vec::new(),
         };
-        result.intern_string("UNKNOWN");
+        result.intern_string("UNKNOWN"); // always at index 0
         result
     }
 
     fn intern_string(&mut self, string: &str) -> StringTableIndex {
-        let _index = match self.string_map.get(string) {
+        let index = match self.string_map.get(string) {
             Some(&index) => index,
             None => {
                 let index = self.strings.len();
@@ -59,8 +62,13 @@ impl StringTable {
                 index
             }
         };
-        //StringTableIndex(index);
-        StringTableIndex(string.to_owned())
+        StringTableIndex(index)
+        //StringTableIndex(string.to_owned())
+    }
+
+    fn get(&self, index: StringTableIndex) -> &str {
+        &self.strings[index.0]
+        //&index.0
     }
 }
 
@@ -142,17 +150,86 @@ impl InternedAddressInfo {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct SymbolicationResult {
+struct PrecogLibrarySymbols {
     debug_name: String,
     debug_id: String,
     code_id: String,
     known_addresses: Vec<(u32, InternedAddressInfo)>,
+
+    #[serde(skip)]
+    string_table: Option<Arc<StringTable>>,
 }
 
-unsafe impl Send for SymbolicationResult {}
-unsafe impl Sync for SymbolicationResult {}
+pub struct PrecogSymbolInfo {
+    string_table: Arc<StringTable>,
+    data: Vec<PrecogLibrarySymbols>,
+}
 
-impl samply_symbols::SymbolMapTrait for SymbolicationResult {
+impl Serialize for PrecogSymbolInfo {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let string_table = self.string_table.as_ref();
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("string_table", string_table)?;
+        map.serialize_entry("data", &self.data)?;
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for PrecogSymbolInfo {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PrecogSymbolInfoVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for PrecogSymbolInfoVisitor {
+            type Value = PrecogSymbolInfo;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct PrecogSymbolInfo")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut string_table: Option<StringTable> = None;
+                let mut data: Option<Vec<PrecogLibrarySymbols>> = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        "string_table" => {
+                            string_table = Some(map.next_value()?);
+                        }
+                        "data" => {
+                            data = Some(map.next_value()?);
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                // Give the shared string table to each PrecogLibrarySymbols
+                let (string_table, mut data) = (string_table.unwrap(), data.unwrap());
+                let string_table = Arc::new(string_table);
+                for lib in &mut data {
+                    lib.string_table = Some(string_table.clone());
+                }
+                Ok(PrecogSymbolInfo {
+                    string_table: string_table,
+                    data: data,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(PrecogSymbolInfoVisitor)
+    }
+}
+
+impl PrecogLibrarySymbols {
+    fn get_string(&self, index: StringTableIndex) -> &str {
+        self.string_table.as_ref().unwrap().get(index)
+    }
+}
+
+impl samply_symbols::SymbolMapTrait for PrecogLibrarySymbols {
     fn debug_id(&self) -> debugid::DebugId {
         debugid::DebugId::from_str(&self.debug_id).expect("bad debugid")
     }
@@ -163,10 +240,14 @@ impl samply_symbols::SymbolMapTrait for SymbolicationResult {
     }
 
     fn iter_symbols(&self) -> Box<dyn Iterator<Item = (u32, std::borrow::Cow<'_, str>)> + '_> {
-        Box::new(KnownAddressIteratorHelper {
-            result: self,
-            next_index: 0,
-        })
+        let iter = self.known_addresses.iter().map(move |(rva, info)| {
+            (
+                *rva,
+                std::borrow::Cow::Borrowed(self.get_string(info.symbol)),
+            )
+        });
+
+        Box::new(iter)
     }
 
     fn lookup_sync(&self, address: wholesym::LookupAddress) -> Option<wholesym::SyncAddressInfo> {
@@ -179,7 +260,7 @@ impl samply_symbols::SymbolMapTrait for SymbolicationResult {
                             symbol: wholesym::SymbolInfo {
                                 address: rva,
                                 size: None,
-                                name: info.symbol.0.clone(),
+                                name: self.get_string(info.symbol).to_owned(),
                             },
                             frames: None,
                         });
@@ -193,40 +274,13 @@ impl samply_symbols::SymbolMapTrait for SymbolicationResult {
     }
 }
 
-struct KnownAddressIteratorHelper<'a> {
-    result: &'a SymbolicationResult,
-    next_index: usize,
-}
-
-impl<'a> Iterator for KnownAddressIteratorHelper<'a> {
-    type Item = (u32, std::borrow::Cow<'a, str>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next_index >= self.result.known_addresses.len() {
-            return None;
-        }
-
-        let (rva, info) = &self.result.known_addresses[self.next_index];
-        self.next_index += 1;
-        Some((*rva, std::borrow::Cow::Borrowed(&info.symbol.0)))
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct PrecogSymbolInfo {
-    string_table: StringTable,
-    data: Vec<SymbolicationResult>,
-}
-
-unsafe impl Sync for PrecogSymbolInfo {}
-unsafe impl Send for PrecogSymbolInfo {}
 impl std::fmt::Debug for PrecogSymbolInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "PrecogSymbolInfo")
     }
 }
 
-impl wholesym::PrecogHelperTrait for PrecogSymbolInfo {}
+impl wholesym::PrecogLibrarySymbolsHelperTrait for PrecogSymbolInfo {}
 
 impl PrecogSymbolInfo {
     pub fn try_load(path: &Path) -> Option<Self> {
@@ -236,19 +290,17 @@ impl PrecogSymbolInfo {
     }
 }
 
-impl PrecogHelper for PrecogSymbolInfo {
+impl PrecogLibrarySymbolsHelper for PrecogSymbolInfo {
     fn lookup_lib(
         &self,
         debug_id: &str,
     ) -> Option<Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>> {
         //eprintln!("lookup_lib: {}", debug_id);
-        self.data
-            .iter()
-            .find(|result| result.debug_id == debug_id)
-            .map(|result| {
-                //eprintln!("found lib: {}", result.debug_id);
-                Box::new((*result).clone()) as Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>
-            })
+        let result = self.data.iter().find(|result| result.debug_id == debug_id);
+
+        result.map(|result| {
+            Box::new(result.clone()) as Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>
+        })
     }
 }
 
@@ -303,7 +355,7 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
                 }
             }
 
-            Some(SymbolicationResult {
+            Some(PrecogLibrarySymbols {
                 debug_name: lib.debug_name.clone(),
                 debug_id: lib.debug_id.to_string(),
                 code_id: lib
@@ -312,6 +364,7 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
                     .map(|id| id.to_string())
                     .unwrap_or("".to_owned()),
                 known_addresses,
+                string_table: None,
             })
         });
 
@@ -321,6 +374,10 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
     }
 
     {
+        let string_table = Arc::new(string_table);
+        for lib in &mut results {
+            lib.string_table = Some(string_table.clone());
+        }
         let info = PrecogSymbolInfo {
             string_table,
             data: results,

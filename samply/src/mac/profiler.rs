@@ -205,10 +205,7 @@ pub fn start_recording(
 
     crate::shared::symbol_precog::presymbolicate(
         &profile,
-        &output_file.with_file_name(format!(
-            "{}_syms",
-            output_file.file_name().unwrap().to_string_lossy()
-        )),
+        &output_file.with_extension("syms.json"),
     );
 
     {

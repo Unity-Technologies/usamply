@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use symsrv::{parse_nt_symbol_path, NtSymbolPathEntry};
 
-use crate::helper::PrecogHelperTrait;
+use crate::helper::PrecogLibrarySymbolsHelperTrait;
 
 /// The configuration of a [`SymbolManager`](crate::SymbolManager).
 ///
@@ -22,7 +22,7 @@ pub struct SymbolManagerConfig {
     pub(crate) use_spotlight: bool,
     pub(crate) debuginfod_cache_dir_if_not_installed: Option<PathBuf>,
     pub(crate) debuginfod_servers: Vec<(String, PathBuf)>,
-    pub(crate) precog_helper: Option<Box<dyn PrecogHelperTrait + 'static>>,
+    pub(crate) precog_helper: Option<Box<dyn PrecogLibrarySymbolsHelperTrait + 'static>>,
 }
 
 impl SymbolManagerConfig {
@@ -178,7 +178,10 @@ impl SymbolManagerConfig {
         self
     }
 
-    pub fn set_precog_helper(mut self, precog_helper: Option<Box<dyn PrecogHelperTrait>>) -> Self {
+    pub fn set_precog_helper(
+        mut self,
+        precog_helper: Option<Box<dyn PrecogLibrarySymbolsHelperTrait>>,
+    ) -> Self {
         self.precog_helper = precog_helper;
         self
     }

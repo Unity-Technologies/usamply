@@ -139,7 +139,7 @@ mod symbol_manager;
 mod vdso;
 
 pub use config::SymbolManagerConfig;
-pub use helper::{PrecogHelper, PrecogHelperTrait};
+pub use helper::{PrecogLibrarySymbolsHelper, PrecogLibrarySymbolsHelperTrait};
 pub use samply_symbols;
 pub use samply_symbols::{
     AddressInfo, CodeId, ElfBuildId, Error, ExternalFileAddressInFileRef, ExternalFileAddressRef,
