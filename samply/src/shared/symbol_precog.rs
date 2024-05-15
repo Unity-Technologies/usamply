@@ -260,7 +260,7 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
 
     let config = wholesym::SymbolManagerConfig::new()
         .use_spotlight(true)
-        .verbose(true)
+        // .verbose(true)
         .respect_nt_symbol_path(true);
     let mut symbol_manager = wholesym::SymbolManager::with_config(config);
 
