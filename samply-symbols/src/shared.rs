@@ -5,6 +5,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, Range};
 use std::str::FromStr;
+use std::sync::Arc;
 
 #[cfg(feature = "partial_read_stats")]
 use bitvec::{bitvec, prelude::BitVec};
@@ -408,7 +409,7 @@ pub trait FileAndPathHelper {
     fn get_symbol_map_for_library(
         &self,
         _info: &LibraryInfo,
-    ) -> Option<(Self::FL, Box<dyn SymbolMapTrait + Send + Sync>)> {
+    ) -> Option<(Self::FL, Arc<dyn SymbolMapTrait + Send + Sync>)> {
         None
     }
 

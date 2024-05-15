@@ -42,7 +42,7 @@ pub trait GetInnerSymbolMapWithLookupFramesExt<FC> {
 enum InnerSymbolMap<FC> {
     WithoutAddFile(Box<dyn GetInnerSymbolMap + Send + Sync>),
     WithAddFile(Box<dyn GetInnerSymbolMapWithLookupFramesExt<FC> + Send + Sync>),
-    Direct(Box<dyn SymbolMapTrait + Send + Sync>),
+    Direct(Arc<dyn SymbolMapTrait + Send + Sync>),
 }
 
 pub struct SymbolMap<H: FileAndPathHelper> {
@@ -77,7 +77,7 @@ impl<H: FileAndPathHelper> SymbolMap<H> {
 
     pub fn with_symbol_map_trait(
         debug_file_location: H::FL,
-        inner: Box<dyn SymbolMapTrait + Send + Sync>,
+        inner: Arc<dyn SymbolMapTrait + Send + Sync>,
     ) -> Self {
         Self {
             debug_file_location,

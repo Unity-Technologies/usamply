@@ -2422,7 +2422,6 @@ dependencies = [
  "rand",
  "rangemap",
  "runas",
- "samply-symbols",
  "serde",
  "serde_derive",
  "serde_json",

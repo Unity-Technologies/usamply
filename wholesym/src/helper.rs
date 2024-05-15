@@ -239,22 +239,6 @@ impl FileAndPathHelper for FileReadOnlyHelper {
     }
 }
 
-/// A trait that provides access to full symbol information for specific addresses
-/// without having to go through the debug info, i.e. if a profile capture's frame addresses
-/// are presymbolicated. This is an interim solution until the profile format is extended
-/// to optionally include full information (file/line numbers, inline frames, etc.).
-pub trait PrecogLibrarySymbolsHelper {
-    fn lookup_lib(
-        &self,
-        debug_id: &str,
-    ) -> Option<Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>>;
-}
-
-pub trait PrecogLibrarySymbolsHelperTrait:
-    PrecogLibrarySymbolsHelper + std::fmt::Debug + Sync + Send
-{
-}
-
 pub struct Helper {
     symsrv_downloader: Option<SymsrvDownloader>,
     debuginfod_symbol_cache: Option<DebuginfodSymbolCache>,
@@ -918,27 +902,28 @@ impl FileAndPathHelper for Helper {
     fn get_symbol_map_for_library(
         &self,
         info: &LibraryInfo,
-    ) -> Option<(Self::FL, Box<dyn SymbolMapTrait + Send + Sync>)> {
-        if let Some(precog_helper) = self.config.precog_helper.as_ref() {
-            precog_helper
-                .lookup_lib(&info.debug_id.unwrap_or_default().to_string())
-                .map(|l| {
-                    let location = WholesymFileLocation::LocalFile(
-                        info.debug_path
-                            .as_ref()
-                            .map(|p| p.clone())
-                            .unwrap_or_else(|| "UNKNOWN".to_string())
-                            .into(),
-                    );
-                    (location, l)
-                })
-        } else {
-            None
-        }
+    ) -> Option<(Self::FL, Arc<dyn SymbolMapTrait + Send + Sync>)> {
+        let Some(precog_data) = self.config.precog_data.as_ref() else {
+            return None;
+        };
+
+        precog_data
+            .precog_data
+            .get(&info.debug_id?)
+            .map(|symbol_map| {
+                let location = WholesymFileLocation::LocalFile(
+                    info.debug_path
+                        .as_ref()
+                        .map(|p| p.clone())
+                        .unwrap_or_else(|| "UNKNOWN".to_string())
+                        .into(),
+                );
+                (location, symbol_map.clone())
+            })
     }
 
     fn has_precog_data_for_testing_only(&self) -> bool {
-        self.config.precog_helper.is_some()
+        self.config.precog_data.is_some()
     }
 }
 

@@ -23,7 +23,6 @@ use wholesym::{LibraryInfo, SymbolManager, SymbolManagerConfig};
 
 use crate::shared;
 use crate::shared::ctrl_c::CtrlC;
-use crate::shared::symbol_precog::PrecogSymbolInfo;
 
 #[derive(Clone, Debug)]
 pub struct ServerProps {
@@ -119,17 +118,11 @@ async fn start_server(
 
     if let Some(profile_filename) = profile_filename {
         let precog_filename = profile_filename.with_extension("syms.json");
-        let precog_helper = shared::symbol_precog::PrecogSymbolInfo::try_load(&precog_filename)
-            .map(|f| {
-                let f = Box::new(f);
-                let static_f: &'static mut PrecogSymbolInfo = Box::leak(f);
-
-                unsafe {
-                    Box::from_raw(static_f as *mut PrecogSymbolInfo)
-                        as Box<dyn wholesym::PrecogLibrarySymbolsHelperTrait>
-                }
-            });
-        config = config.set_precog_helper(precog_helper);
+        if let Some(precog_info) =
+            shared::symbol_precog::PrecogSymbolInfo::try_load(&precog_filename)
+        {
+            config = config.set_precog_data(precog_info.into_hash_map());
+        }
     }
 
     if let Some(home_dir) = dirs::home_dir() {

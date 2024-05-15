@@ -1,9 +1,20 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::{collections::HashMap, sync::Arc};
 
+use debugid::DebugId;
 use symsrv::{parse_nt_symbol_path, NtSymbolPathEntry};
 
-use crate::helper::PrecogLibrarySymbolsHelperTrait;
+// Helper struct to avoid not being able to derive Debug on SymbolManagerConfig
+pub(crate) struct PrecogDataContainer {
+    pub(crate) precog_data: HashMap<DebugId, Arc<dyn samply_symbols::SymbolMapTrait + Send + Sync>>,
+}
+
+impl std::fmt::Debug for PrecogDataContainer {
+    // Explicit implementation needed due to precog_data
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("...")
+    }
+}
 
 /// The configuration of a [`SymbolManager`](crate::SymbolManager).
 ///
@@ -22,7 +33,7 @@ pub struct SymbolManagerConfig {
     pub(crate) use_spotlight: bool,
     pub(crate) debuginfod_cache_dir_if_not_installed: Option<PathBuf>,
     pub(crate) debuginfod_servers: Vec<(String, PathBuf)>,
-    pub(crate) precog_helper: Option<Box<dyn PrecogLibrarySymbolsHelperTrait + 'static>>,
+    pub(crate) precog_data: Option<PrecogDataContainer>,
 }
 
 impl SymbolManagerConfig {
@@ -178,11 +189,12 @@ impl SymbolManagerConfig {
         self
     }
 
-    pub fn set_precog_helper(
+    /// Provide explicit symbol maps for a set of debug IDs.
+    pub fn set_precog_data(
         mut self,
-        precog_helper: Option<Box<dyn PrecogLibrarySymbolsHelperTrait>>,
+        precog_data: HashMap<DebugId, Arc<dyn samply_symbols::SymbolMapTrait + Send + Sync>>,
     ) -> Self {
-        self.precog_helper = precog_helper;
+        self.precog_data = Some(PrecogDataContainer { precog_data });
         self
     }
 }

@@ -4,12 +4,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
+use debugid::DebugId;
 use serde::{
     ser::SerializeMap, ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_derive::{Deserialize, Serialize};
 use serde_json::to_writer;
-use wholesym::PrecogLibrarySymbolsHelper;
 
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 struct StringTableIndex(usize);
@@ -229,7 +229,7 @@ impl PrecogLibrarySymbols {
     }
 }
 
-impl samply_symbols::SymbolMapTrait for PrecogLibrarySymbols {
+impl wholesym::samply_symbols::SymbolMapTrait for PrecogLibrarySymbols {
     fn debug_id(&self) -> debugid::DebugId {
         debugid::DebugId::from_str(&self.debug_id).expect("bad debugid")
     }
@@ -280,27 +280,26 @@ impl std::fmt::Debug for PrecogSymbolInfo {
     }
 }
 
-impl wholesym::PrecogLibrarySymbolsHelperTrait for PrecogSymbolInfo {}
-
 impl PrecogSymbolInfo {
     pub fn try_load(path: &Path) -> Option<Self> {
         let file = File::open(path).ok()?;
         let reader = std::io::BufReader::new(file);
         serde_json::from_reader(reader).ok()
     }
-}
 
-impl PrecogLibrarySymbolsHelper for PrecogSymbolInfo {
-    fn lookup_lib(
-        &self,
-        debug_id: &str,
-    ) -> Option<Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>> {
-        //eprintln!("lookup_lib: {}", debug_id);
-        let result = self.data.iter().find(|result| result.debug_id == debug_id);
-
-        result.map(|result| {
-            Box::new(result.clone()) as Box<dyn samply_symbols::SymbolMapTrait + Send + Sync>
-        })
+    pub fn into_hash_map(
+        self,
+    ) -> HashMap<DebugId, Arc<dyn wholesym::samply_symbols::SymbolMapTrait + Send + Sync>> {
+        self.data
+            .into_iter()
+            .map(|lib| {
+                (
+                    DebugId::from_str(&lib.debug_id).unwrap(),
+                    Arc::new(lib)
+                        as Arc<dyn wholesym::samply_symbols::SymbolMapTrait + Send + Sync>,
+                )
+            })
+            .collect()
     }
 }
 
