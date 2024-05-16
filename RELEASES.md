@@ -4,6 +4,13 @@
 
 ## Unreleased - ReleaseDate
 
+## 0.12.4 - 2024-05-16 - Unity release
+
+### Features
+
+ - Add `--unstable-presymbolicate` option to `record`. If set, this will generate a `.syms.json` file next to the profile. If both files are available, the profile is self-contained and can be loaded with `load` without debug information files being available (no assembly for JIT methods will be available, though). This is especially useful for capturing profiles in an automated way on CI.
+ - Add `--pid` support on macOS. This requires self-signing the profiler binary to grant the debugger entitlement.
+
 ## 0.12.1 - 2024-05-09 - Unity release
 
 ### Features
