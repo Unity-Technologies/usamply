@@ -1,17 +1,11 @@
-use crate::shared::recording_props::{RecordingMode, RecordingProps};
+use super::elevated_helper::ElevatedRecordingProps;
 
-pub fn gfx_xperf_args(props: &RecordingProps, recording_mode: &RecordingMode) -> Vec<String> {
+pub fn gfx_xperf_args(props: &ElevatedRecordingProps) -> Vec<String> {
     let mut providers = vec![];
 
     if !props.gfx {
         return providers;
     }
-
-    let _is_attach = match recording_mode {
-        RecordingMode::All => true,
-        RecordingMode::Pid(_) => true,
-        RecordingMode::Launch(_) => false,
-    };
 
     const DXGKRNL_BASE_KEYWORD: u64 = 0x1;
 

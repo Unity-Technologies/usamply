@@ -43,6 +43,8 @@ use etw_reader::{
 
 use crate::windows::profile_context::{KnownCategory, ProfileContext};
 
+use super::elevated_helper::ElevatedRecordingProps;
+
 struct SavedMarkerInfo {
     start: Timestamp,
     name: String,
@@ -217,18 +219,12 @@ impl ProfilerMarker for CoreClrGcEventMarker {
     }
 }
 
-pub fn coreclr_xperf_args(props: &RecordingProps, recording_mode: &RecordingMode) -> Vec<String> {
+pub fn coreclr_xperf_args(props: &ElevatedRecordingProps) -> Vec<String> {
     let mut providers = vec![];
 
     if !props.coreclr {
         return providers;
     }
-
-    let is_attach = match recording_mode {
-        RecordingMode::All => true,
-        RecordingMode::Pid(_) => true,
-        RecordingMode::Launch(_) => false,
-    };
 
     // Enabling all the DotNETRuntime keywords is very expensive. In particular,
     // enabling the NGenKeyword causes info to be generated for every NGen'd method; we should
@@ -261,7 +257,7 @@ pub fn coreclr_xperf_args(props: &RecordingProps, recording_mode: &RecordingMode
     let mut info_keywords = CORECLR_LOADER_KEYWORD | CORECLR_STACK_KEYWORD | CORECLR_GC_KEYWORD;
     let mut verbose_keywords = CORECLR_JIT_KEYWORD | CORECLR_NGEN_KEYWORD;
     // if we're attaching, ask for a rundown of method info at the start of collection
-    let mut rundown_verbose_keywords = if is_attach {
+    let mut rundown_verbose_keywords = if props.is_attach {
         CORECLR_LOADER_KEYWORD | CORECLR_JIT_KEYWORD | CORECLR_RUNDOWN_START_KEYWORD
     } else {
         0
@@ -352,6 +348,7 @@ pub fn handle_coreclr_event(
             .remove_last_event_for_thread(thread_handle);
     }
 
+    #[allow(clippy::if_same_then_else)]
     if let Some(method_event) = dotnet_event
         .strip_prefix("CLRMethod/")
         .or(dotnet_event.strip_prefix("CLRMethodRundown/"))
@@ -376,7 +373,7 @@ pub fn handle_coreclr_event(
                 let method_namespace: String = parser.parse("MethodNamespace");
                 let method_signature: String = parser.parse("MethodSignature");
 
-                let method_start_address: Address = if is_r2r { parser.parse("EntryPoint") } else { parser.parse("MethodStartAddress") };
+                let method_start_address: u64 = if is_r2r { parser.parse("EntryPoint") } else { parser.parse("MethodStartAddress") };
                 let method_size: u32 = parser.parse("MethodSize"); // TODO: R2R doesn't have a size?
 
                 // There's a v0, v1, and v2 version of this event. There are rules in `eventtrace.cpp` in the runtime
@@ -392,7 +389,6 @@ pub fn handle_coreclr_event(
                 let method_name = format!("{method_basename} [{method_namespace}] \u{2329}{method_signature}\u{232a}");
 
                 let mut process_jit_info = context.get_process_jit_info(process_id);
-                let start_address = method_start_address.as_u64();
                 let relative_address = process_jit_info.next_relative_address;
                 process_jit_info.next_relative_address += method_size;
 
@@ -403,8 +399,8 @@ pub fn handle_coreclr_event(
                 let category = context.get_category(KnownCategory::CoreClrJit);
                 let info = LibMappingInfo::new_jit_function(process_jit_info.lib_handle, category.into(), None);
                 process_jit_info.jit_mapping_ops.push(timestamp_raw, LibMappingOp::Add(LibMappingAdd {
-                    start_avma: start_address,
-                    end_avma: start_address + (method_size as u64),
+                    start_avma: method_start_address,
+                    end_avma: method_start_address + (method_size as u64),
                     relative_address_at_start: relative_address,
                     info
                 }));
