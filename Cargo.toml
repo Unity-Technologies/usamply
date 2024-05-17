@@ -11,8 +11,7 @@ members = [
     "wholesym-addr2line",
     "tools/benchmarks",
     "tools/dump_table",
-    "tools/query_api",
-    "pdb2"
+    "tools/query_api"
 ]
 exclude = ["etw-reader"] # Should not be compiled on non-Windows
 
@@ -37,3 +36,6 @@ precise-builds = true
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[patch.crates-io.pdb2]
+path = "pdb2"

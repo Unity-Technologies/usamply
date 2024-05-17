@@ -817,15 +817,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "getopts"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
-dependencies = [
- "unicode-width",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1418,7 +1409,7 @@ dependencies = [
  "bitflags 2.5.0",
  "elsa",
  "maybe-owned",
- "pdb2 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pdb2",
  "range-collections",
  "thiserror",
 ]
@@ -1426,18 +1417,6 @@ dependencies = [
 [[package]]
 name = "pdb2"
 version = "0.9.0"
-dependencies = [
- "fallible-iterator 0.2.0",
- "getopts",
- "scroll",
- "uuid",
-]
-
-[[package]]
-name = "pdb2"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00e30e131bcab0d41a2e471cf777ea9b1402f2a0764bcf1780251eab1b0d175d"
 dependencies = [
  "fallible-iterator 0.2.0",
  "scroll",
@@ -2372,12 +2351,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "unicode-width"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68f5e5f3158ecfd4b8ff6fe086db7c8467a2dfdac97fe420f2b7c4aa97af66d6"
-
-[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2396,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "usamply"
-version = "0.12.4"
+version = "0.12.5"
 dependencies = [
  "bitflags 2.5.0",
  "byteorder",
