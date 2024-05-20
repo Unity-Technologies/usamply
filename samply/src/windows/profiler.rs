@@ -66,7 +66,7 @@ pub fn start_recording(
     let mut elevated_helper = ElevatedHelperSession::new(recording_props.output_file.clone())
         .unwrap_or_else(|e| panic!("Couldn't start elevated helper process: {e:?}"));
     elevated_helper
-        .start_xperf(&recording_props, &recording_mode)
+        .start_xperf(&recording_props, &profile_creation_props, &recording_mode)
         .unwrap();
 
     let included_processes = match recording_mode {
@@ -140,13 +140,15 @@ pub fn start_recording(
 
     eprintln!("Processing ETL trace...");
 
-    let output_file = recording_props.output_file;
+    let output_file = recording_props.output_file.clone();
 
     let arch = profile_creation_props
         .override_arch
-        .unwrap_or(get_native_arch().to_string());
+        .as_ref()
+        .unwrap_or(&get_native_arch().to_string()).clone();
 
-    let mut context = ProfileContext::new(profile, &arch, included_processes);
+    let mut context = ProfileContext::new(profile, &arch, included_processes,
+        Some(profile_creation_props.coreclr));
     etw_gecko::profile_pid_from_etl_file(&mut context, &merged_etl);
 
     // delete etl_file

@@ -20,6 +20,7 @@ use crate::shared::context_switch::{
 use crate::shared::included_processes::IncludedProcesses;
 use crate::shared::jit_category_manager::JitCategoryManager;
 use crate::shared::lib_mappings::LibMappingOpQueue;
+use crate::shared::recording_props::{CoreClrProfileProps, ProfileCreationProps, RecordingProps};
 use crate::shared::types::{StackFrame, StackMode};
 use crate::shared::unresolved_samples::{
     SampleOrMarker, UnresolvedSamples, UnresolvedStackHandle, UnresolvedStacks,
@@ -199,6 +200,7 @@ impl ProfileContext {
         mut profile: Profile,
         arch: &str,
         included_processes: Option<IncludedProcesses>,
+        coreclr_props: Option<CoreClrProfileProps>,
     ) -> Self {
         // On 64-bit systems, the kernel address space always has 0xF in the first 16 bits.
         // The actual kernel address space is much higher, but we just need this to disambiguate kernel and user
@@ -229,7 +231,7 @@ impl ProfileContext {
             device_mappings: winutils::get_dos_device_mappings(),
             kernel_min,
             arch: arch.to_string(),
-            coreclr_context: RefCell::new(CoreClrContext::new()),
+            coreclr_context: RefCell::new(CoreClrContext::new(coreclr_props.unwrap_or_default())),
         }
     }
 

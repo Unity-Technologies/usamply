@@ -28,7 +28,7 @@ pub fn convert_etl_file_to_profile(
 
     let arch = get_native_arch(); // TODO: Detect from file if reading from file
 
-    let mut context = ProfileContext::new(profile, arch, included_processes);
+    let mut context = ProfileContext::new(profile, arch, included_processes, Some(profile_creation_props.coreclr));
 
     etw_gecko::profile_pid_from_etl_file(&mut context, filename);
 

@@ -16,7 +16,7 @@ use fxprof_processed_profile::*;
 use serde_json::{json, to_writer, Value};
 use uuid::Uuid;
 
-use crate::shared::jit_category_manager::JitCategoryManager;
+use crate::shared::{jit_category_manager::JitCategoryManager, recording_props::CoreClrProfileProps};
 use crate::shared::lib_mappings::LibMappingInfo;
 use crate::shared::lib_mappings::{LibMappingAdd, LibMappingOp, LibMappingOpQueue};
 use crate::shared::process_sample_data::{MarkerSpanOnThread, ProcessSampleData, SimpleMarker};
@@ -52,13 +52,15 @@ struct SavedMarkerInfo {
 }
 
 pub struct CoreClrContext {
+    props: CoreClrProfileProps,
     last_marker_on_thread: HashMap<ThreadHandle, MarkerHandle>,
     gc_markers_on_thread: HashMap<ThreadHandle, HashMap<&'static str, SavedMarkerInfo>>,
 }
 
 impl CoreClrContext {
-    pub fn new() -> Self {
+    pub fn new(props: CoreClrProfileProps) -> Self {
         Self {
+            props,
             last_marker_on_thread: HashMap::new(),
             gc_markers_on_thread: HashMap::new(),
         }
@@ -222,7 +224,7 @@ impl ProfilerMarker for CoreClrGcEventMarker {
 pub fn coreclr_xperf_args(props: &ElevatedRecordingProps) -> Vec<String> {
     let mut providers = vec![];
 
-    if !props.coreclr {
+    if !props.coreclr.any_enabled() {
         return providers;
     }
 
@@ -254,8 +256,16 @@ pub fn coreclr_xperf_args(props: &ElevatedRecordingProps) -> Vec<String> {
     const CORECLR_RUNDOWN_START_KEYWORD: u64 = 0x00000040;
 
     // if STACK is enabled, then every CoreCLR event will also generate a stack event right afterwards
-    let mut info_keywords = CORECLR_LOADER_KEYWORD | CORECLR_STACK_KEYWORD | CORECLR_GC_KEYWORD;
+    let mut info_keywords = CORECLR_LOADER_KEYWORD;
+    if props.coreclr.event_stacks {
+        info_keywords |= CORECLR_STACK_KEYWORD;
+    }
+    if props.coreclr.gc_markers || props.coreclr.gc_suspensions || props.coreclr.gc_detailed_allocs {
+        info_keywords |= CORECLR_GC_KEYWORD;
+    }
+
     let mut verbose_keywords = CORECLR_JIT_KEYWORD | CORECLR_NGEN_KEYWORD;
+
     // if we're attaching, ask for a rundown of method info at the start of collection
     let mut rundown_verbose_keywords = if props.is_attach {
         CORECLR_LOADER_KEYWORD | CORECLR_JIT_KEYWORD | CORECLR_RUNDOWN_START_KEYWORD
@@ -263,7 +273,7 @@ pub fn coreclr_xperf_args(props: &ElevatedRecordingProps) -> Vec<String> {
         0
     };
 
-    if props.coreclr_allocs {
+    if props.coreclr.gc_detailed_allocs {
         info_keywords |= CORECLR_GC_SAMPLED_OBJECT_ALLOCATION_HIGH_KEYWORD
             | CORECLR_GC_SAMPLED_OBJECT_ALLOCATION_LOW_KEYWORD;
     }
@@ -305,6 +315,11 @@ pub fn handle_coreclr_event(
     parser: &mut Parser,
     timestamp_converter: &TimestampConverter,
 ) {
+    let (gc_markers, gc_suspensions, gc_allocs, event_stacks) = {
+        let cc = context.coreclr_context.borrow();
+        (cc.props.gc_markers, cc.props.gc_suspensions, cc.props.gc_detailed_allocs, cc.props.event_stacks)
+    };
+
     let timestamp_raw = s.timestamp() as u64;
     let timestamp = timestamp_converter.convert_time(timestamp_raw);
 
@@ -459,6 +474,10 @@ pub fn handle_coreclr_event(
 
         //eprintln!("Type/BulkType count: {} user_buffer size: {} values len: {}", count, s.user_buffer().len(), values.len());
     } else if dotnet_event == "CLRStack/CLRStackWalk" {
+        if !event_stacks {
+            return;
+        }
+
         // If the STACK keyword is enabled, we get a CLRStackWalk following each CLR event that supports stacks. Not every event
         // does. The info about which does and doesn't is here: https://github.com/dotnet/runtime/blob/main/src/coreclr/vm/ClrEtwAllMeta.lst
         // Current dotnet (8.0.x) seems to have a bug where `MethodJitMemoryAllocatedForCode` events will fire a stackwalk,
@@ -513,6 +532,10 @@ pub fn handle_coreclr_event(
         let gc_category = context.get_category(KnownCategory::CoreClrGc);
         match gc_event {
             "GCSampledObjectAllocation" => {
+                if !gc_markers || !gc_allocs {
+                    return;
+                }
+
                 // If High/Low flags are set, then we get one of these for every alloc. Otherwise only
                 // when a threshold is hit. (100kb) The count and size are aggregates in that case.
                 let type_id: u64 = parser.parse("TypeID"); // TODO: convert to str, with bulk type data
@@ -534,6 +557,10 @@ pub fn handle_coreclr_event(
                 handled = true;
             }
             "Triggered" => {
+                if !gc_markers {
+                    return;
+                }
+
                 let reason: u32 = parser.parse("Reason");
 
                 let reason_str = match reason {
@@ -567,6 +594,10 @@ pub fn handle_coreclr_event(
                 handled = true;
             }
             "GCSuspendEEBegin" => {
+                if !gc_suspensions {
+                    return;
+                }
+
                 // Reason, Count
                 let count: u32 = parser.parse("Count");
                 let reason: u32 = parser.parse("Reason");
@@ -600,6 +631,10 @@ pub fn handle_coreclr_event(
                 handled = true;
             }
             "GCRestartEEEnd" => {
+                if !gc_suspensions {
+                    return;
+                }
+
                 if let Some(info) = context
                     .coreclr_context
                     .borrow_mut()
@@ -616,6 +651,10 @@ pub fn handle_coreclr_event(
                 handled = true;
             }
             "win:Start" => {
+                if !gc_markers {
+                    return;
+                }
+
                 let count: u32 = parser.parse("Count");
                 let depth: u32 = parser.parse("Depth");
                 let reason: u32 = parser.parse("Reason");
@@ -660,6 +699,10 @@ pub fn handle_coreclr_event(
                 handled = true;
             }
             "win:Stop" => {
+                if !gc_markers {
+                    return;
+                }
+
                 //let count: u32 = parser.parse("Count");
                 //let depth: u32 = parser.parse("Depth");
                 if let Some(info) = context
