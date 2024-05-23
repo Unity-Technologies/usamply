@@ -721,6 +721,9 @@ impl ProfileContext {
     }
 
     pub fn make_process_name(&self, image_file_name: &str, cmdline: &str) -> String {
+        if let Some(name) = name_for_runner_process(image_file_name, cmdline) {
+            return name;
+        }
         let executable_path = self.map_device_path(image_file_name);
         let executable_name = extract_filename(&executable_path);
         make_process_name(
@@ -2237,4 +2240,29 @@ fn extract_filename(path: &str) -> &str {
         Some((_base, file_name)) => file_name,
         None => path,
     }
+}
+
+// dotnet.exe and cmd.exe are runner processes: the interesting name is the command
+// they were told to run, not "dotnet.exe" or "cmd.exe" themselves.
+fn name_for_runner_process(image_file_name: &str, cmdline: &str) -> Option<String> {
+    let file_name = extract_filename(image_file_name);
+
+    // Super hacky command line parsing; split at spaces, remove any surrounding quotes.
+    // Will break if paths have embedded spaces.
+    let mut parts = cmdline
+        .split(' ')
+        .map(|s| s.trim_matches(|c| c == '"' || c == '\''));
+
+    if file_name.eq_ignore_ascii_case("dotnet.exe") {
+        let dotnet_dll = parts.skip(1).find(|s| {
+            let lc = s.to_ascii_lowercase();
+            lc.ends_with(".dll") || lc.ends_with(".exe")
+        })?;
+        return Some(format!("{} (.NET)", extract_filename(dotnet_dll)));
+    }
+    if file_name.eq_ignore_ascii_case("cmd.exe") {
+        let cmd_name = parts.find(|s| !s.starts_with('/') && !s.starts_with('-'))?;
+        return Some(format!("{cmd_name} (cmd)"));
+    }
+    None
 }
