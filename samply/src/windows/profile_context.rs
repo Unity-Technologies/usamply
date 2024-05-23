@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use debugid::DebugId;
@@ -534,13 +535,15 @@ impl ProfileContext {
         pid: u32,
         parent_pid: u32,
         image_file_name: String,
+        command_line: Option<String>,
     ) {
         if !self.is_interesting_process(pid, Some(parent_pid), Some(&image_file_name)) {
             return;
         }
 
         let timestamp = self.timestamp_converter.convert_time(timestamp_raw);
-        let name = self.map_device_path(&image_file_name);
+        let name =
+            self.name_for_process(&image_file_name, command_line.as_ref().map(String::as_str));
         let process_handle = self.profile.add_process(&name, pid, timestamp);
         let main_thread_handle = self
             .profile
@@ -580,6 +583,7 @@ impl ProfileContext {
         pid: u32,
         parent_pid: u32,
         image_file_name: String,
+        command_line: Option<String>,
     ) {
         if !self.is_interesting_process(pid, Some(parent_pid), Some(&image_file_name)) {
             return;
@@ -594,7 +598,8 @@ impl ProfileContext {
                 .push(dead_process_with_reused_pid);
         }
 
-        let name = self.map_device_path(&image_file_name);
+        let name =
+            self.name_for_process(&image_file_name, command_line.as_ref().map(String::as_str));
         if let Some(process_recycler) = self.process_recycler.as_mut() {
             if let Some(ProcessRecyclingData {
                 process_handle,
@@ -1703,6 +1708,58 @@ impl ProfileContext {
             timing,
         );
         //println!("unhandled {}", s.name())
+    }
+
+    // Given an image file and an optional command line, try to pull out an informative process name.
+    // The command line is expected to contain the actual command as the first argument. (e.g. if the
+    // image is "C:\...\dotnet.exe", the command line should contain "dotnet.exe myapp.dll").
+    fn name_for_process(&self, image_file_name: &str, command_line: Option<&str>) -> String {
+        let image_path_str = self.map_device_path(image_file_name);
+        let Some(command_line) = command_line else {
+            return image_path_str;
+        };
+        let Ok(image_path) = PathBuf::from_str(&image_path_str) else {
+            return image_path_str;
+        };
+        let Some(file_name) = image_path.file_name().map(|s| s.to_string_lossy()) else {
+            return image_path_str;
+        };
+
+        // Super hacky command line parsing; split at spaces, remove any surrounding quotes.
+        // Will break if paths have embedded spaces.
+        let parts = command_line
+            .split(' ')
+            .map(|s| s.trim_matches(|c| c == '"' || c == '\''));
+
+        if file_name == "dotnet.exe" {
+            eprintln!("dotnet.exe: {}", command_line);
+            if let Some(dotnet_dll) = parts
+                .skip(1)
+                .filter(|&s| {
+                    let lc = s.to_ascii_lowercase();
+                    lc.ends_with(".dll") || lc.ends_with(".exe")
+                })
+                .nth(0)
+            {
+                if let Ok(dotnet_dll_path) = PathBuf::from_str(&dotnet_dll) {
+                    return format!(
+                        "{} (.NET)",
+                        dotnet_dll_path.file_name().unwrap().to_string_lossy()
+                    );
+                }
+            }
+        } else if file_name == "cmd.exe" {
+            eprintln!("cmd.exe: {}", command_line);
+            if let Some(cmd_name) = parts
+                .filter(|&s| !s.starts_with('/') && !s.starts_with('-'))
+                .nth(0)
+            {
+                return format!("{} (cmd)", cmd_name);
+            }
+        }
+
+        // Fall back to the image file name
+        image_path_str
     }
 
     pub fn finish(mut self) -> Profile {
