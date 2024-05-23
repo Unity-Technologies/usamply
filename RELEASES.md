@@ -4,6 +4,12 @@
 
 ## Unreleased - ReleaseDate
 
+## 0.12.6 - 2024-05-23 - Unity release
+
+### Features
+
+ - Add flags to `--coreclr` to reduce the number of markers GC data provides. GC data is off by default.
+
 ## 0.12.5 - 2024-05-16 - Unity release
 
 ### Features
