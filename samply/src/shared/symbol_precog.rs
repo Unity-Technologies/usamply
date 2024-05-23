@@ -10,10 +10,10 @@ use serde::{
 };
 use serde_derive::{Deserialize, Serialize};
 use serde_json::to_writer;
+use wholesym::SourceFilePath;
 
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 struct StringTableIndex(usize);
-//struct StringTableIndex(String);
 
 impl Serialize for StringTableIndex {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -23,16 +23,8 @@ impl Serialize for StringTableIndex {
 
 impl<'de> Deserialize<'de> for StringTableIndex {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        Ok(StringTableIndex(usize::from_str(&value).unwrap()))
-        //Ok(StringTableIndex(value))
-    }
-}
-
-impl StringTableIndex {
-    fn unknown() -> StringTableIndex {
-        StringTableIndex(0)
-        //StringTableIndex("UNKNOWN".to_owned())
+        let value = usize::deserialize(deserializer)?;
+        Ok(StringTableIndex(value))
     }
 }
 
@@ -98,9 +90,9 @@ impl<'de> Deserialize<'de> for StringTable {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct InternedFrameDebugInfo {
-    function: StringTableIndex,
-    file: StringTableIndex,
-    line: u32,
+    function: Option<StringTableIndex>,
+    file: Option<StringTableIndex>,
+    line: Option<u32>,
 }
 
 impl InternedFrameDebugInfo {
@@ -108,44 +100,49 @@ impl InternedFrameDebugInfo {
         let function = frame
             .function
             .as_ref()
-            .map_or(StringTableIndex::unknown(), |name| {
-                strtab.intern_string(name)
-            });
+            .map(|name| strtab.intern_string(name));
         let file = frame
             .file_path
             .as_ref()
-            .map_or(StringTableIndex::unknown(), |name| {
-                strtab.intern_string(name.raw_path())
-            });
-        let line = frame.line_number.unwrap_or(0);
+            .map(|name| strtab.intern_string(name.raw_path()));
         InternedFrameDebugInfo {
             function,
             file,
-            line,
+            line: frame.line_number,
         }
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct InternedAddressInfo {
+struct InternedSymbolInfo {
+    rva: u32,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<u32>,
+
     symbol: StringTableIndex,
 
     #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    frames: Vec<InternedFrameDebugInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frames: Option<Vec<InternedFrameDebugInfo>>,
 }
 
-impl InternedAddressInfo {
-    fn new(info: &wholesym::AddressInfo, strtab: &mut StringTable) -> InternedAddressInfo {
+impl InternedSymbolInfo {
+    fn new(info: &wholesym::AddressInfo, strtab: &mut StringTable) -> InternedSymbolInfo {
         let symbol = strtab.intern_string(&info.symbol.name);
-        let frames = info
-            .frames
-            .as_ref()
-            .unwrap_or(&Vec::new())
-            .iter()
-            .map(|frame| InternedFrameDebugInfo::new(frame, strtab))
-            .collect();
-        InternedAddressInfo { symbol, frames }
+        let frames = info.frames.as_ref().map(|frames| {
+            frames
+                .iter()
+                .map(|frame| InternedFrameDebugInfo::new(frame, strtab))
+                .collect()
+        });
+        InternedSymbolInfo {
+            rva: info.symbol.address,
+            size: info.symbol.size,
+            symbol,
+            frames,
+        }
     }
 }
 
@@ -154,7 +151,10 @@ struct PrecogLibrarySymbols {
     debug_name: String,
     debug_id: String,
     code_id: String,
-    known_addresses: Vec<(u32, InternedAddressInfo)>,
+    symbol_table: Vec<InternedSymbolInfo>,
+    // vector of (rva, index in symbol_table) so that multiple addresses
+    // within a function map to the same symbol
+    known_addresses: Vec<(u32, usize)>,
 
     #[serde(skip)]
     string_table: Option<Arc<StringTable>>,
@@ -192,8 +192,8 @@ impl<'de> Deserialize<'de> for PrecogSymbolInfo {
             ) -> Result<Self::Value, A::Error> {
                 let mut string_table: Option<StringTable> = None;
                 let mut data: Option<Vec<PrecogLibrarySymbols>> = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
                         "string_table" => {
                             string_table = Some(map.next_value()?);
                         }
@@ -224,6 +224,14 @@ impl PrecogLibrarySymbols {
     fn get_string(&self, index: StringTableIndex) -> &str {
         self.string_table.as_ref().unwrap().get(index)
     }
+
+    fn get_owned_string(&self, index: StringTableIndex) -> String {
+        self.get_string(index).to_owned()
+    }
+
+    fn get_owned_opt_string(&self, index: Option<StringTableIndex>) -> Option<String> {
+        index.map(|index| self.get_string(index).to_owned())
+    }
 }
 
 impl wholesym::samply_symbols::SymbolMapTrait for PrecogLibrarySymbols {
@@ -237,9 +245,9 @@ impl wholesym::samply_symbols::SymbolMapTrait for PrecogLibrarySymbols {
     }
 
     fn iter_symbols(&self) -> Box<dyn Iterator<Item = (u32, std::borrow::Cow<'_, str>)> + '_> {
-        let iter = self.known_addresses.iter().map(move |(rva, info)| {
+        let iter = self.symbol_table.iter().map(move |info| {
             (
-                *rva,
+                info.rva,
                 std::borrow::Cow::Borrowed(self.get_string(info.symbol)),
             )
         });
@@ -250,23 +258,40 @@ impl wholesym::samply_symbols::SymbolMapTrait for PrecogLibrarySymbols {
     fn lookup_sync(&self, address: wholesym::LookupAddress) -> Option<wholesym::SyncAddressInfo> {
         match address {
             wholesym::LookupAddress::Relative(rva) => {
-                for (known_rva, info) in &self.known_addresses {
+                for (known_rva, sym_index) in &self.known_addresses {
                     if *known_rva == rva {
                         //eprintln!("lookup_sync: 0x{:x} -> {}", rva, info.symbol.0);
+                        let info = &self.symbol_table[*sym_index];
                         return Some(wholesym::SyncAddressInfo {
                             symbol: wholesym::SymbolInfo {
-                                address: rva,
-                                size: None,
-                                name: self.get_string(info.symbol).to_owned(),
+                                address: info.rva,
+                                size: info.size,
+                                name: self.get_owned_string(info.symbol),
                             },
-                            frames: None,
+                            frames: info.frames.as_ref().map(|frames| {
+                                wholesym::FramesLookupResult::Available(
+                                    frames
+                                        .iter()
+                                        .map(|frame| wholesym::FrameDebugInfo {
+                                            function: self.get_owned_opt_string(frame.function),
+                                            file_path: frame.file.map(|file| {
+                                                SourceFilePath::new(
+                                                    self.get_string(file).to_owned(),
+                                                    None,
+                                                )
+                                            }),
+                                            line_number: frame.line,
+                                        })
+                                        .collect(),
+                                )
+                            }),
                         });
                     }
                 }
                 None
             }
-            wholesym::LookupAddress::Svma(_) => todo!(),
-            wholesym::LookupAddress::FileOffset(_) => todo!(),
+            wholesym::LookupAddress::Svma(_) => None,
+            wholesym::LookupAddress::FileOffset(_) => None,
         }
     }
 }
@@ -281,7 +306,7 @@ impl PrecogSymbolInfo {
     pub fn try_load(path: &Path) -> Option<Self> {
         let file = File::open(path).ok()?;
         let reader = std::io::BufReader::new(file);
-        serde_json::from_reader(reader).ok()
+        serde_json::from_reader(reader).expect("failed to parse sidecar syms.json")
     }
 
     pub fn into_hash_map(
@@ -313,8 +338,6 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
     let mut symbol_manager = wholesym::SymbolManager::with_config(config);
 
     for (lib, rvas) in profile.lib_used_rva_iter() {
-        let Some(rvas) = rvas else { continue };
-
         // Add the library to the symbol manager with all the info, so that load_symbol_map can find it later
         symbol_manager.add_known_library(wholesym::LibraryInfo {
             name: Some(lib.debug_name.clone()),
@@ -340,14 +363,23 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
                 return None;
             };
 
+            let mut symbol_table = Vec::new();
+            let mut symbol_table_map = HashMap::new();
+
             let mut known_addresses = Vec::new();
             for rva in rvas {
                 if let Some(addr_info) = symbol_map
                     .lookup(wholesym::LookupAddress::Relative(*rva))
                     .await
                 {
-                    let info = InternedAddressInfo::new(&addr_info, &mut string_table);
-                    known_addresses.push((*rva, info));
+                    let index = symbol_table_map
+                        .entry(addr_info.symbol.address)
+                        .or_insert_with(|| {
+                            let info = InternedSymbolInfo::new(&addr_info, &mut string_table);
+                            symbol_table.push(info);
+                            symbol_table.len() - 1
+                        });
+                    known_addresses.push((*rva, *index));
                 }
             }
 
@@ -359,6 +391,7 @@ pub fn presymbolicate(profile: &fxprof_processed_profile::Profile, precog_output
                     .as_ref()
                     .map(|id| id.to_string())
                     .unwrap_or("".to_owned()),
+                symbol_table,
                 known_addresses,
                 string_table: None,
             })

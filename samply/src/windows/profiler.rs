@@ -66,7 +66,7 @@ pub fn start_recording(
     let mut elevated_helper = ElevatedHelperSession::new(recording_props.output_file.clone())
         .unwrap_or_else(|e| panic!("Couldn't start elevated helper process: {e:?}"));
     elevated_helper
-        .start_xperf(&recording_props, &recording_mode)
+        .start_xperf(&recording_props, &profile_creation_props, &recording_mode)
         .unwrap();
 
     let included_processes = match recording_mode {
@@ -140,14 +140,18 @@ pub fn start_recording(
 
     eprintln!("Processing ETL trace...");
 
-    let output_file = recording_props.output_file;
+    let output_file = recording_props.output_file.clone();
 
     let arch = profile_creation_props
         .override_arch
+        .clone()
         .unwrap_or(get_native_arch().to_string());
 
-    let mut context = ProfileContext::new(profile, &arch, included_processes);
+    let unstable_presymbolicate = profile_creation_props.unstable_presymbolicate;
+    let mut context =
+        ProfileContext::new(profile, &arch, included_processes, profile_creation_props);
     etw_gecko::profile_pid_from_etl_file(&mut context, &merged_etl);
+    let profile = context.finish();
 
     // delete etl_file
     std::fs::remove_file(&merged_etl).unwrap_or_else(|_| {
@@ -158,16 +162,15 @@ pub fn start_recording(
     });
 
     // write the profile to a json file
+    let file = File::create(&output_file).unwrap();
+    let writer = BufWriter::new(file);
     {
-        let file = File::create(&output_file).unwrap();
-        let writer = BufWriter::new(file);
-        let profile = context.profile.borrow();
-        to_writer(writer, &*profile).expect("Couldn't write JSON");
+        to_writer(writer, &profile).expect("Couldn't write JSON");
     }
 
-    if profile_creation_props.unstable_presymbolicate {
+    if unstable_presymbolicate {
         crate::shared::symbol_precog::presymbolicate(
-            &context.profile.borrow(),
+            &profile,
             &output_file.with_extension("syms.json"),
         );
     }

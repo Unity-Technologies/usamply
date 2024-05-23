@@ -2,6 +2,27 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use serde_derive::{Deserialize, Serialize};
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+pub struct CoreClrProfileProps {
+    pub enabled: bool,
+    pub gc_markers: bool,
+    pub gc_suspensions: bool,
+    pub gc_detailed_allocs: bool,
+    pub event_stacks: bool,
+}
+
+impl CoreClrProfileProps {
+    pub fn any_enabled(&self) -> bool {
+        self.enabled
+            || self.gc_markers
+            || self.gc_suspensions
+            || self.gc_detailed_allocs
+            || self.event_stacks
+    }
+}
+
 /// Properties which are meaningful both for recording a fresh process
 /// as well as for recording an existing process.
 #[derive(Debug, Clone)]
@@ -9,9 +30,6 @@ pub struct RecordingProps {
     pub output_file: PathBuf,
     pub time_limit: Option<Duration>,
     pub interval: Duration,
-    pub main_thread_only: bool,
-    pub coreclr: bool,
-    pub coreclr_allocs: bool,
     pub vm_hack: bool,
     pub gfx: bool,
 }
@@ -43,6 +61,8 @@ impl RecordingMode {
 #[derive(Debug, Clone)]
 pub struct ProfileCreationProps {
     pub profile_name: String,
+    /// Only include the main thread of each process.
+    pub main_thread_only: bool,
     /// Merge non-overlapping threads of the same name.
     pub reuse_threads: bool,
     /// Fold repeated frames at the base of the stack.
@@ -56,6 +76,10 @@ pub struct ProfileCreationProps {
     pub override_arch: Option<String>,
     /// Dump presymbolication info.
     pub unstable_presymbolicate: bool,
+    /// CoreCLR specific properties.
+    pub coreclr: CoreClrProfileProps,
+    /// Create markers for unknown events.
+    pub unknown_event_markers: bool,
 }
 
 /// Properties which are meaningful for launching and recording a fresh process.

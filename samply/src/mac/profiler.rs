@@ -34,9 +34,8 @@ pub fn start_recording(
 
     let root_task_runner: Box<dyn RootTaskRunner> = match recording_mode {
         RecordingMode::All => {
-            // TODO: Implement, by sudo launching a helper process which uses task_for_pid
-            eprintln!("Error: Profiling existing processes is currently not supported on macOS.");
-            eprintln!("You can only profile processes which you launch via samply.");
+            eprintln!("Error: Profiling all processes is not supported on macOS.");
+            eprintln!("You can only profile processes which you launch via samply, or attach to via --pid.");
             std::process::exit(1)
         }
         RecordingMode::Pid(pid) => {
@@ -57,7 +56,7 @@ pub fn start_recording(
                 iteration_count,
             } = process_launch_props;
 
-            if recording_props.coreclr {
+            if profile_creation_props.coreclr.any_enabled() {
                 // We need to set DOTNET_PerfMapEnabled=2 in the environment if it's not already set.
                 // If we set it, we'll also set unlink_aux_files=true to avoid leaving files
                 // behind in the temp directory. But if it's set manually, assume the user
