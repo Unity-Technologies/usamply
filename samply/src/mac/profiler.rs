@@ -57,12 +57,12 @@ pub fn start_recording(
             } = process_launch_props;
 
             if profile_creation_props.coreclr.any_enabled() {
-                // We need to set DOTNET_PerfMapEnabled=2 in the environment if it's not already set.
+                // We need to set DOTNET_PerfMapEnabled=3 in the environment if it's not already set.
                 // If we set it, we'll also set unlink_aux_files=true to avoid leaving files
                 // behind in the temp directory. But if it's set manually, assume the user
                 // knows what they're doing and will specify the arg as needed.
                 if !env_vars.iter().any(|p| p.0 == "DOTNET_PerfMapEnabled") {
-                    env_vars.push(("DOTNET_PerfMapEnabled".into(), "2".into()));
+                    env_vars.push(("DOTNET_PerfMapEnabled".into(), "3".into()));
                     unlink_aux_files = true;
                 }
             }

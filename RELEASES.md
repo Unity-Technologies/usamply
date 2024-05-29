@@ -4,6 +4,12 @@
 
 ## Unreleased - ReleaseDate
 
+## 0.12.7 - 2024-05-28 - Unity release
+
+### Features
+
+ - For `--coreclr` on mac, set `DOTNET_PerfMapEnabled=3` instead of 2, to only produce much smaller perfmap files instead of jitdump files. If full jit assembly is needed, the environment variable can be set manually.
+
 ## 0.12.6 - 2024-05-23 - Unity release
 
 ### Features

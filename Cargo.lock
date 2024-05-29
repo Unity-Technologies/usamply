@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "usamply"
-version = "0.12.5"
+version = "0.12.6"
 dependencies = [
  "bitflags 2.5.0",
  "byteorder",
