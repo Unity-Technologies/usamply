@@ -1739,7 +1739,7 @@ impl ProfileContext {
             .map(|s| s.trim_matches(|c| c == '"' || c == '\''));
 
         if file_name == "dotnet.exe" {
-            eprintln!("dotnet.exe: {}", command_line);
+            //eprintln!("dotnet.exe: {}", command_line);
             if let Some(dotnet_dll) = parts
                 .skip(1)
                 .filter(|&s| {
@@ -1756,7 +1756,7 @@ impl ProfileContext {
                 }
             }
         } else if file_name == "cmd.exe" {
-            eprintln!("cmd.exe: {}", command_line);
+            //eprintln!("cmd.exe: {}", command_line);
             if let Some(cmd_name) = parts
                 .filter(|&s| !s.starts_with('/') && !s.starts_with('-'))
                 .nth(0)
