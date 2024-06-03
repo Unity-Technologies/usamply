@@ -32,6 +32,7 @@ pub struct RecordingProps {
     pub interval: Duration,
     pub vm_hack: bool,
     pub gfx: bool,
+    pub keep_etl: bool,
 }
 
 /// Which process(es) to record.
@@ -80,6 +81,8 @@ pub struct ProfileCreationProps {
     pub coreclr: CoreClrProfileProps,
     /// Create markers for unknown events.
     pub unknown_event_markers: bool,
+    pub tstart: Option<u32>,
+    pub tstop: Option<u32>,
 }
 
 /// Properties which are meaningful for launching and recording a fresh process.

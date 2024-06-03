@@ -275,6 +275,9 @@ pub struct ProfileContext {
 
     /// Only include main threads.
     main_thread_only: bool,
+
+    tstart_ns: Option<u64>,
+    tstop_ns: Option<u64>,
 }
 
 impl ProfileContext {
@@ -299,6 +302,8 @@ impl ProfileContext {
             None
         };
         let main_thread_only = profile_creation_props.main_thread_only;
+        let tstart_ns = profile_creation_props.tstart.map(|t| t as u64 * 10_000_000);
+        let tstop_ns = profile_creation_props.tstop.map(|t| t as u64 * 10_000_000);
 
         Self {
             profile,
@@ -330,6 +335,8 @@ impl ProfileContext {
             },
             event_timestamps_are_qpc: false,
             main_thread_only,
+            tstart_ns,
+            tstop_ns,
         }
     }
 
@@ -1760,6 +1767,17 @@ impl ProfileContext {
 
         // Fall back to the image file name
         image_path_str
+    }
+
+    pub fn is_in_time_range(&self, ts_raw: u64) -> bool {
+        let ts = ts_raw - self.timestamp_converter.reference_raw;
+        if self.tstart_ns.is_some() && ts < self.tstart_ns.unwrap() {
+            return false;
+        }
+        if self.tstop_ns.is_some() && ts > self.tstop_ns.unwrap() {
+            return false;
+        }
+        true
     }
 
     pub fn finish(mut self) -> Profile {
