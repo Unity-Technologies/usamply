@@ -4,22 +4,13 @@
 
 ## Unreleased - ReleaseDate
 
-## 0.12.7 - 2024-05-28 - Unity release
+## 0.12.8 - 2024-05-28 - Unity release
 
 ### Features
 
+ - Add --tstart and --tstop options for limiting to a time range (in seconds) of a Windows profile.
  - For `--coreclr` on mac, set `DOTNET_PerfMapEnabled=3` instead of 2, to only produce much smaller perfmap files instead of jitdump files. If full jit assembly is needed, the environment variable can be set manually.
-
-## 0.12.6 - 2024-05-23 - Unity release
-
-### Features
-
  - Add flags to `--coreclr` to reduce the number of markers GC data provides. GC data is off by default.
-
-## 0.12.5 - 2024-05-16 - Unity release
-
-### Features
-
  - Add `--unstable-presymbolicate` option to `record`. If set, this will generate a `.syms.json` file next to the profile. If both files are available, the profile is self-contained and can be loaded with `load` without debug information files being available (no assembly for JIT methods will be available, though). This is especially useful for capturing profiles in an automated way on CI.
  - Add `--pid` support on macOS. This requires self-signing the profiler binary to grant the debugger entitlement.
 
