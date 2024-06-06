@@ -12,7 +12,7 @@ members = [
     "tools/benchmarks",
     "tools/dump_table",
     "tools/query_api"
-]
+, "eventpipe-rs"]
 exclude = ["etw-reader"] # Should not be compiled on non-Windows
 
 # Config for 'cargo dist'

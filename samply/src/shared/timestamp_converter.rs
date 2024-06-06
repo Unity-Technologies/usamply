@@ -21,4 +21,10 @@ impl TimestampConverter {
             (time_us * 1000).saturating_sub(self.reference_raw * self.raw_to_ns_factor),
         )
     }
+
+    #[allow(unused)]
+    pub fn convert_to_raw(&self, timestamp: Timestamp) -> u64 {
+        (timestamp.as_nanos_since_reference() / self.raw_to_ns_factor)
+            .saturating_add(self.reference_raw)
+    }
 }

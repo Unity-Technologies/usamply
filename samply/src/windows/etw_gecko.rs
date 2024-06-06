@@ -11,8 +11,11 @@ use etw_reader::{
 use fxprof_processed_profile::debugid;
 use uuid::Uuid;
 
+use super::coreclr::CoreClrContext;
 use super::profile_context::ProfileContext;
-use crate::windows::coreclr;
+use crate::shared::coreclr::CoreClrProviderProps;
+use crate::windows::coreclr::{self, handle_new_coreclr_event};
+use crate::windows::etw_coreclr::CoreClrEtwConverter;
 use crate::windows::profile_context::KnownCategory;
 
 pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) {
@@ -25,7 +28,18 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
 
     let demand_zero_faults = false; //pargs.contains("--demand-zero-faults");
 
-    let mut core_clr_context = coreclr::CoreClrContext::new(context.creation_props());
+    let coreclr_props = context.creation_props().coreclr;
+    let mut core_clr_context = CoreClrContext::new(
+        CoreClrProviderProps {
+            is_attach: false,
+            gc_markers: coreclr_props.gc_markers,
+            gc_suspensions: coreclr_props.gc_suspensions,
+            gc_detailed_allocs: coreclr_props.gc_detailed_allocs,
+            event_stacks: coreclr_props.event_stacks,
+        },
+        false,
+    );
+    let mut core_clr_converter = CoreClrEtwConverter::new();
 
     let result = open_trace(etl_file, |e| {
         let Ok(s) = schema_locator.event_schema(e) else {
@@ -385,9 +399,21 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 );
             }
             dotnet_event if dotnet_event.starts_with("Microsoft-Windows-DotNETRuntime") => {
-                let is_in_range = context.is_in_time_range(timestamp_raw);
+                let is_in_time_range = context.is_in_time_range(timestamp_raw);
                 // Note: No "/" at end of event name, because we want DotNETRuntimeRundown as well
-                coreclr::handle_coreclr_event(context, &mut core_clr_context, &s, &mut parser, is_in_range);
+                //coreclr::handle_coreclr_event(context, &mut core_clr_context, &s, &mut parser, is_in_time_range);
+                if let Some(event) = core_clr_converter.etw_event_to_coreclr_event(
+                    &mut core_clr_context,
+                    &s,
+                    &mut parser,
+                ) {
+                    handle_new_coreclr_event(
+                        context,
+                        &mut core_clr_context,
+                        &event,
+                        is_in_time_range,
+                    );
+                }
             }
             _ => {
                 if !context.is_in_time_range(timestamp_raw) {

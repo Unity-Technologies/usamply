@@ -1,10 +1,8 @@
 use std::{collections::HashMap, convert::TryInto, fmt::Display};
 
-use bitflags::bitflags;
+use eventpipe::coreclr::{GcSuspendEeReason, GcType};
 use fxprof_processed_profile::*;
-use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use serde_json::json;
 
 use etw_reader::{self, schema::TypedEvent};
 use etw_reader::{
@@ -12,32 +10,30 @@ use etw_reader::{
     parser::{Parser, TryParse},
 };
 
+use crate::shared::coreclr::*;
 use crate::shared::process_sample_data::SimpleMarker;
 use crate::shared::recording_props::{CoreClrProfileProps, ProfileCreationProps};
+
 use crate::windows::profile_context::{KnownCategory, ProfileContext};
 
 use super::elevated_helper::ElevatedRecordingProps;
 
-struct SavedMarkerInfo {
-    start_timestamp_raw: u64,
-    name: String,
-    description: String,
-}
-
 pub struct CoreClrContext {
-    props: CoreClrProfileProps,
+    pub props: CoreClrProviderProps,
+    pub unknown_event_markers: bool,
+
     last_marker_on_thread: HashMap<u32, MarkerHandle>,
     gc_markers_on_thread: HashMap<u32, HashMap<&'static str, SavedMarkerInfo>>,
-    unknown_event_markers: bool,
 }
 
 impl CoreClrContext {
-    pub fn new(profile_creation_props: ProfileCreationProps) -> Self {
+    pub fn new(props: CoreClrProviderProps, unknown_event_markers: bool) -> Self {
         Self {
-            props: profile_creation_props.coreclr,
+            props,
+            unknown_event_markers,
+
             last_marker_on_thread: HashMap::new(),
             gc_markers_on_thread: HashMap::new(),
-            unknown_event_markers: profile_creation_props.unknown_event_markers,
         }
     }
 
@@ -74,229 +70,6 @@ impl CoreClrContext {
     }
 }
 
-bitflags! {
-    #[derive(PartialEq, Eq)]
-    pub struct CoreClrMethodFlagsMap: u32 {
-        const dynamic = 0x1;
-        const generic = 0x2;
-        const has_shared_generic_code = 0x4;
-        const jitted = 0x8;
-        const jit_helper = 0x10;
-        const profiler_rejected_precompiled_code = 0x20;
-        const ready_to_run_rejected_precompiled_code = 0x40;
-
-        // next three bits are the tiered compilation level
-        const opttier_bit0 = 0x80;
-        const opttier_bit1 = 0x100;
-        const opttier_bit2 = 0x200;
-
-        // extent flags/value (hot/cold)
-        const extent_bit_0 = 0x10000000; // 0x1 == cold, 0x0 = hot
-        const extent_bit_1 = 0x20000000; // always 0 for now looks like
-        const extent_bit_2 = 0x40000000;
-        const extent_bit_3 = 0x80000000;
-
-        const _ = !0;
-    }
-    #[derive(PartialEq, Eq)]
-    pub struct TieredCompilationSettingsMap: u32 {
-        const None = 0x0;
-        const QuickJit = 0x1;
-        const QuickJitForLoops = 0x2;
-        const TieredPGO = 0x4;
-        const ReadyToRun = 0x8;
-    }
-}
-
-#[allow(unused)]
-mod constants {
-    pub const CORECLR_GC_KEYWORD: u64 = 0x1; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-garbage-collection-events
-    pub const CORECLR_GC_HANDLE_KEYWORD: u64 = 0x2;
-    pub const CORECLR_BINDER_KEYWORD: u64 = 0x4; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-loader-binder-events
-    pub const CORECLR_LOADER_KEYWORD: u64 = 0x8; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-loader-binder-events
-    pub const CORECLR_JIT_KEYWORD: u64 = 0x10; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-method-events
-    pub const CORECLR_NGEN_KEYWORD: u64 = 0x20; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-method-events
-    pub const CORECLR_RUNDOWN_START_KEYWORD: u64 = 0x00000040;
-    pub const CORECLR_INTEROP_KEYWORD: u64 = 0x2000; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-interop-events
-    pub const CORECLR_CONTENTION_KEYWORD: u64 = 0x4000;
-    pub const CORECLR_EXCEPTION_KEYWORD: u64 = 0x8000; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-exception-events
-    pub const CORECLR_THREADING_KEYWORD: u64 = 0x10000; // https://learn.microsoft.com/en-us/dotnet/fundamentals/diagnostics/runtime-thread-events
-    pub const CORECLR_JIT_TO_NATIVE_METHOD_MAP_KEYWORD: u64 = 0x20000;
-    pub const CORECLR_GC_SAMPLED_OBJECT_ALLOCATION_HIGH_KEYWORD: u64 = 0x200000; // https://medium.com/criteo-engineering/build-your-own-net-memory-profiler-in-c-allocations-1-2-9c9f0c86cefd
-    pub const CORECLR_GC_HEAP_AND_TYPE_NAMES: u64 = 0x1000000;
-    pub const CORECLR_GC_SAMPLED_OBJECT_ALLOCATION_LOW_KEYWORD: u64 = 0x2000000;
-    pub const CORECLR_STACK_KEYWORD: u64 = 0x40000000; // https://learn.microsoft.com/en-us/dotnet/framework/performance/stack-etw-event (note: says .NET Framework, but applies to CoreCLR also)
-    pub const CORECLR_COMPILATION_KEYWORD: u64 = 0x1000000000;
-    pub const CORECLR_COMPILATION_DIAGNOSTIC_KEYWORD: u64 = 0x2000000000;
-    pub const CORECLR_TYPE_DIAGNOSTIC_KEYWORD: u64 = 0x8000000000;
-}
-
-#[derive(Debug, Clone, FromPrimitive)]
-enum GcReason {
-    AllocSmall = 0,
-    Induced,
-    LowMemory,
-    Empty,
-    AllocLarge,
-    OutOfSpaceSmallObjectHeap,
-    OutOfSpaceLargeObjectHeap,
-    InducedNoForce,
-    Stress,
-    InducedLowMemory,
-}
-
-impl Display for GcReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GcReason::AllocSmall => f.write_str("Small object heap allocation"),
-            GcReason::Induced => f.write_str("Induced"),
-            GcReason::LowMemory => f.write_str("Low memory"),
-            GcReason::Empty => f.write_str("Empty"),
-            GcReason::AllocLarge => f.write_str("Large object heap allocation"),
-            GcReason::OutOfSpaceSmallObjectHeap => {
-                f.write_str("Out of space (for small object heap)")
-            }
-            GcReason::OutOfSpaceLargeObjectHeap => {
-                f.write_str("Out of space (for large object heap)")
-            }
-            GcReason::InducedNoForce => f.write_str("Induced but not forced as blocking"),
-            GcReason::Stress => f.write_str("Stress"),
-            GcReason::InducedLowMemory => f.write_str("Induced low memory"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, FromPrimitive)]
-enum GcSuspendEeReason {
-    Other = 0,
-    GC,
-    AppDomainShutdown,
-    CodePitching,
-    Shutdown,
-    Debugger,
-    GcPrep,
-    DebuggerSweep,
-}
-
-impl Display for GcSuspendEeReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GcSuspendEeReason::Other => f.write_str("Other"),
-            GcSuspendEeReason::GC => f.write_str("GC"),
-            GcSuspendEeReason::AppDomainShutdown => f.write_str("AppDomain shutdown"),
-            GcSuspendEeReason::CodePitching => f.write_str("Code pitching"),
-            GcSuspendEeReason::Shutdown => f.write_str("Shutdown"),
-            GcSuspendEeReason::Debugger => f.write_str("Debugger"),
-            GcSuspendEeReason::GcPrep => f.write_str("GC prep"),
-            GcSuspendEeReason::DebuggerSweep => f.write_str("Debugger sweep"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, FromPrimitive)]
-enum GcType {
-    Blocking,
-    Background,
-    BlockingDuringBackground,
-}
-
-impl Display for GcType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GcType::Blocking => f.write_str("Blocking GC"),
-            GcType::Background => f.write_str("Background GC"),
-            GcType::BlockingDuringBackground => f.write_str("Blocking GC during background GC"),
-        }
-    }
-}
-// String is type name
-#[derive(Debug, Clone)]
-pub struct CoreClrGcAllocMarker(pub String, usize);
-
-impl ProfilerMarker for CoreClrGcAllocMarker {
-    const MARKER_TYPE_NAME: &'static str = "GC Alloc";
-
-    fn json_marker_data(&self) -> serde_json::Value {
-        json!({
-            "type": Self::MARKER_TYPE_NAME,
-            "clrtype": self.0,
-            "size": self.1,
-        })
-    }
-
-    fn schema() -> MarkerSchema {
-        MarkerSchema {
-            type_name: Self::MARKER_TYPE_NAME,
-            locations: vec![
-                MarkerLocation::MarkerChart,
-                MarkerLocation::MarkerTable,
-                MarkerLocation::TimelineMemory,
-            ],
-            chart_label: Some("GC Alloc"),
-            tooltip_label: Some("GC Alloc: {marker.data.clrtype} ({marker.data.size} bytes)"),
-            table_label: Some("GC Alloc"),
-            fields: vec![
-                MarkerSchemaField::Dynamic(MarkerDynamicField {
-                    key: "clrtype",
-                    label: "CLR Type",
-                    format: MarkerFieldFormat::String,
-                    searchable: true,
-                }),
-                MarkerSchemaField::Dynamic(MarkerDynamicField {
-                    key: "size",
-                    label: "Size",
-                    format: MarkerFieldFormat::Bytes,
-                    searchable: false,
-                }),
-                MarkerSchemaField::Static(MarkerStaticField {
-                    label: "Description",
-                    value: "GC Allocation.",
-                }),
-            ],
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CoreClrGcEventMarker(pub String);
-
-impl ProfilerMarker for CoreClrGcEventMarker {
-    const MARKER_TYPE_NAME: &'static str = "GC Event";
-
-    fn json_marker_data(&self) -> serde_json::Value {
-        json!({
-            "type": Self::MARKER_TYPE_NAME,
-            "event": self.0,
-        })
-    }
-
-    fn schema() -> MarkerSchema {
-        MarkerSchema {
-            type_name: Self::MARKER_TYPE_NAME,
-            locations: vec![
-                MarkerLocation::MarkerChart,
-                MarkerLocation::MarkerTable,
-                MarkerLocation::TimelineMemory,
-            ],
-            chart_label: Some("{marker.data.event}"),
-            tooltip_label: Some("{marker.data.event}"),
-            table_label: Some("{marker.data.event}"),
-            fields: vec![
-                MarkerSchemaField::Dynamic(MarkerDynamicField {
-                    key: "event",
-                    label: "Event",
-                    format: MarkerFieldFormat::String,
-                    searchable: true,
-                }),
-                MarkerSchemaField::Static(MarkerStaticField {
-                    label: "Description",
-                    value: "Generic GC Event.",
-                }),
-            ],
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DisplayUnknownIfNone<'a, T>(pub &'a Option<T>);
 
@@ -310,72 +83,20 @@ impl<'a, T: Display> Display for DisplayUnknownIfNone<'a, T> {
 }
 
 pub fn coreclr_xperf_args(props: &ElevatedRecordingProps) -> Vec<String> {
-    let mut providers = vec![];
-
     if !props.coreclr.any_enabled() {
-        return providers;
+        return vec![];
     }
 
-    // Enabling all the DotNETRuntime keywords is very expensive. In particular,
-    // enabling the NGenKeyword causes info to be generated for every NGen'd method; we should
-    // instead use the native PDB info from ModuleLoad events to get this information.
-    //
-    // Also enabling the rundown keyword causes a bunch of DCStart/DCEnd events to be generated,
-    // which is only useful if we're tracing an already running process.
-    // if STACK is enabled, then every CoreCLR event will also generate a stack event right afterwards
-    use constants::*;
-    let mut info_keywords = CORECLR_LOADER_KEYWORD;
-    if props.coreclr.event_stacks {
-        info_keywords |= CORECLR_STACK_KEYWORD;
-    }
-    if props.coreclr.gc_markers || props.coreclr.gc_suspensions || props.coreclr.gc_detailed_allocs
-    {
-        info_keywords |= CORECLR_GC_KEYWORD;
-    }
-
-    let verbose_keywords = CORECLR_JIT_KEYWORD | CORECLR_NGEN_KEYWORD;
-
-    // if we're attaching, ask for a rundown of method info at the start of collection
-    let rundown_verbose_keywords = if props.is_attach {
-        CORECLR_LOADER_KEYWORD | CORECLR_JIT_KEYWORD | CORECLR_RUNDOWN_START_KEYWORD
-    } else {
-        0
+    // copy matching property names from props.coreclr into CoreClrProviderProperties
+    let coreclr_props = CoreClrProviderProps {
+        is_attach: props.is_attach,
+        gc_markers: props.coreclr.gc_markers,
+        gc_suspensions: props.coreclr.gc_suspensions,
+        gc_detailed_allocs: props.coreclr.gc_detailed_allocs,
+        event_stacks: props.coreclr.event_stacks,
     };
 
-    if props.coreclr.gc_detailed_allocs {
-        info_keywords |= CORECLR_GC_SAMPLED_OBJECT_ALLOCATION_HIGH_KEYWORD
-            | CORECLR_GC_SAMPLED_OBJECT_ALLOCATION_LOW_KEYWORD;
-    }
-
-    if info_keywords != 0 {
-        providers.push(format!(
-            "Microsoft-Windows-DotNETRuntime:0x{:x}:4",
-            info_keywords
-        ));
-    }
-
-    if verbose_keywords != 0 {
-        // For some reason, we don't get JIT MethodLoad (non-Verbose) in Info level,
-        // even though we should. This is OK though, because non-Verbose MethodLoad doesn't
-        // include the method string names (we would have to pull it out based on MethodID,
-        // and I'm not sure which events include the mapping -- MethodJittingStarted is also
-        // verbose).
-        providers.push(format!(
-            "Microsoft-Windows-DotNETRuntime:0x{:x}:5",
-            verbose_keywords
-        ));
-    }
-
-    if rundown_verbose_keywords != 0 {
-        providers.push(format!(
-            "Microsoft-Windows-DotNETRuntimeRundown:0x{:x}:5",
-            rundown_verbose_keywords
-        ));
-    }
-
-    //providers.push(format!("Microsoft-Windows-DotNETRuntime"));
-
-    providers
+    coreclr_provider_args(coreclr_props)
 }
 
 pub fn handle_coreclr_event(
@@ -735,5 +456,89 @@ pub fn handle_coreclr_event(
         );
 
         coreclr_context.set_last_event_for_thread(tid, marker_handle);
+    }
+}
+
+pub fn handle_new_coreclr_event(
+    context: &mut ProfileContext,
+    coreclr_context: &mut CoreClrContext,
+    event: &CoreClrEvent,
+    is_in_time_range: bool,
+) {
+    let (gc_markers, gc_suspensions, gc_allocs) = (
+        coreclr_context.props.gc_markers,
+        coreclr_context.props.gc_suspensions,
+        coreclr_context.props.gc_detailed_allocs,
+    );
+
+    // Handle events that we need to handle whether in time range or not first
+
+    match event {
+        CoreClrEvent::MethodLoad(e) => {
+            let method_name = e.name.to_string();
+            context.handle_coreclr_method_load(
+                e.common.timestamp,
+                e.common.process_id,
+                method_name,
+                e.start_address,
+                e.size,
+            );
+        }
+        CoreClrEvent::MethodUnload(e) => {
+            // don't care
+        }
+        CoreClrEvent::GcTriggered(e) if is_in_time_range && gc_markers => {
+            let mh = context.add_thread_instant_marker(
+                e.common.timestamp,
+                e.common.thread_id,
+                KnownCategory::CoreClrGc,
+                "GC Trigger",
+                CoreClrGcEventMarker(format!("GC Trigger: {}", e.reason)),
+            );
+            coreclr_context.set_last_event_for_thread(e.common.thread_id, mh);
+        }
+        CoreClrEvent::GcAllocationTick(e) if is_in_time_range && gc_allocs => {}
+        CoreClrEvent::GcSampledObjectAllocation(e) if is_in_time_range && gc_allocs => {
+            let mh = context.add_thread_instant_marker(
+                e.common.timestamp,
+                e.common.thread_id,
+                KnownCategory::CoreClrGc,
+                "GC Alloc",
+                CoreClrGcAllocMarker(
+                    format!("{}", DisplayUnknownIfNone(&e.type_name)),
+                    e.total_size as usize,
+                ),
+            );
+            coreclr_context.set_last_event_for_thread(e.common.thread_id, mh);
+        }
+        CoreClrEvent::GcStart(e) if is_in_time_range && gc_markers => {
+            // TODO: use gc_type_str as the name
+            coreclr_context.save_gc_marker(
+                e.common.thread_id,
+                e.common.timestamp,
+                "GC",
+                "GC".to_owned(),
+                format!(
+                    "{}: {} (GC #{}, gen{})",
+                    DisplayUnknownIfNone(&e.gc_type),
+                    e.reason,
+                    e.count,
+                    DisplayUnknownIfNone(&e.depth)
+                ),
+            );
+        }
+        CoreClrEvent::GcEnd(e) if is_in_time_range && gc_markers => {
+            if let Some(info) = coreclr_context.remove_gc_marker(e.common.thread_id, "GC") {
+                context.add_thread_interval_marker(
+                    info.start_timestamp_raw,
+                    e.common.timestamp,
+                    e.common.thread_id,
+                    KnownCategory::CoreClrGc,
+                    &info.name,
+                    CoreClrGcEventMarker(info.description),
+                );
+            }
+        }
+        _ => {}
     }
 }

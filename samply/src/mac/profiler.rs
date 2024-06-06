@@ -13,9 +13,10 @@ use super::error::SamplingError;
 use super::process_launcher::{
     ExistingProcessRunner, MachError, ReceivedStuff, RootTaskRunner, TaskAccepter, TaskLauncher,
 };
-use super::sampler::{JitdumpOrMarkerPath, Sampler, TaskInit, TaskInitOrShutdown};
+use super::sampler::{ProcessSpecificPath, Sampler, TaskInit, TaskInitOrShutdown};
 use super::time::get_monotonic_timestamp;
 use crate::server::{start_server_main, ServerProps};
+use crate::shared::coreclr::CoreClrProviderProps;
 use crate::shared::recording_props::{
     ProcessLaunchProps, ProfileCreationProps, RecordingMode, RecordingProps,
 };
@@ -61,9 +62,33 @@ pub fn start_recording(
                 // If we set it, we'll also set unlink_aux_files=true to avoid leaving files
                 // behind in the temp directory. But if it's set manually, assume the user
                 // knows what they're doing and will specify the arg as needed.
-                if !env_vars.iter().any(|p| p.0 == "DOTNET_PerfMapEnabled") {
-                    env_vars.push(("DOTNET_PerfMapEnabled".into(), "3".into()));
-                    unlink_aux_files = true;
+                //if !env_vars.iter().any(|p| p.0 == "DOTNET_PerfMapEnabled") {
+                //    env_vars.push(("DOTNET_PerfMapEnabled".into(), "3".into()));
+                //    unlink_aux_files = true;
+                //}
+
+                let coreclr_props = CoreClrProviderProps {
+                    event_stacks: profile_creation_props.coreclr.event_stacks,
+                    gc_markers: profile_creation_props.coreclr.gc_markers,
+                    gc_suspensions: profile_creation_props.coreclr.gc_suspensions,
+                    gc_detailed_allocs: profile_creation_props.coreclr.gc_detailed_allocs,
+                    is_attach: false,
+                };
+                let provider_args = crate::shared::coreclr::coreclr_provider_args(coreclr_props);
+
+                let mut add_env_var = |key: &str, value: &str| {
+                    eprintln!("{key}={value}");
+                    env_vars.push((key.into(), value.into()));
+                };
+
+                add_env_var("DOTNET_EnableEventPipe", "1");
+                add_env_var(
+                    "DOTNET_EventPipeOutputPath",
+                    "/tmp/samply-dotnet-{pid}.nettrace",
+                );
+                add_env_var("DOTNET_EventPipeConfig", &provider_args.join(","));
+                if profile_creation_props.coreclr.event_stacks {
+                    add_env_var("DOTNET_EventPipeEnableStackwalk", "1");
                 }
             }
 
@@ -133,7 +158,7 @@ pub fn start_recording(
                     match path_senders_per_pid.entry(pid) {
                         Entry::Occupied(mut entry) => {
                             let send_result =
-                                entry.get_mut().send(JitdumpOrMarkerPath::JitdumpPath(path));
+                                entry.get_mut().send(ProcessSpecificPath::JitdumpPath(path));
                             if send_result.is_err() {
                                 // The task is probably already dead. The path arrived too late.
                                 entry.remove();
@@ -151,7 +176,25 @@ pub fn start_recording(
                         Entry::Occupied(mut entry) => {
                             let send_result = entry
                                 .get_mut()
-                                .send(JitdumpOrMarkerPath::MarkerFilePath(path));
+                                .send(ProcessSpecificPath::MarkerFilePath(path));
+                            if send_result.is_err() {
+                                // The task is probably already dead. The path arrived too late.
+                                entry.remove();
+                            }
+                        }
+                        Entry::Vacant(_entry) => {
+                            eprintln!(
+                                "Received a marker file path for pid {pid} which I don't have a task for."
+                            );
+                        }
+                    }
+                }
+                Ok(ReceivedStuff::DotnetTracePath(pid, path)) => {
+                    match path_senders_per_pid.entry(pid) {
+                        Entry::Occupied(mut entry) => {
+                            let send_result = entry
+                                .get_mut()
+                                .send(ProcessSpecificPath::DotnetTracePath(path));
                             if send_result.is_err() {
                                 // The task is probably already dead. The path arrived too late.
                                 entry.remove();

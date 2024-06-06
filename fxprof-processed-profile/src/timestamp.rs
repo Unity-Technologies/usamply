@@ -18,6 +18,10 @@ impl Timestamp {
             nanos: (millis * 1_000_000.0) as u64,
         }
     }
+
+    pub fn as_nanos_since_reference(&self) -> u64 {
+        self.nanos
+    }
 }
 
 impl Serialize for Timestamp {

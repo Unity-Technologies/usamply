@@ -31,8 +31,9 @@ use super::kernel_error::{IntoResult, KernelError};
 use super::proc_maps::{
     DyldInfo, DyldInfoManager, Modification, ModuleSvmaInfo, StackwalkerRef, VmSubData,
 };
-use super::sampler::{JitdumpOrMarkerPath, TaskInit};
+use super::sampler::{ProcessSpecificPath, TaskInit};
 use super::thread_profiler::{get_thread_id, get_thread_name, ThreadProfiler};
+use crate::shared::coreclr::DotnetTraceManager;
 use crate::shared::jit_category_manager::JitCategoryManager;
 use crate::shared::jit_function_recycler::JitFunctionRecycler;
 use crate::shared::jitdump_manager::JitDumpManager;
@@ -106,8 +107,9 @@ pub struct TaskProfiler {
     main_thread_label_frame: FrameInfo,
     ignored_errors: Vec<SamplingError>,
     unwinder: UnwinderNative<UnwindSectionBytes, MayAllocateDuringUnwind>,
-    path_receiver: Receiver<JitdumpOrMarkerPath>,
+    path_receiver: Receiver<ProcessSpecificPath>,
     jitdump_manager: JitDumpManager,
+    dotnet_trace_manager: DotnetTraceManager,
     marker_file_paths: Vec<(ThreadHandle, PathBuf)>,
     unresolved_samples: UnresolvedSamples,
     lib_mapping_ops: LibMappingOpQueue,
@@ -289,6 +291,7 @@ impl TaskProfiler {
             unwinder: UnwinderNative::new(),
             path_receiver,
             jitdump_manager: JitDumpManager::new(profile_creation_props.unlink_aux_files),
+            dotnet_trace_manager: DotnetTraceManager::new(profile_creation_props.unlink_aux_files),
             marker_file_paths: Vec::new(),
             lib_mapping_ops: Default::default(),
             unresolved_samples: Default::default(),
@@ -570,9 +573,9 @@ impl TaskProfiler {
     }
 
     pub fn check_received_paths(&mut self) {
-        while let Ok(jitdump_or_marker_file_path) = self.path_receiver.try_recv() {
-            match jitdump_or_marker_file_path {
-                JitdumpOrMarkerPath::JitdumpPath(jitdump_path) => {
+        while let Ok(process_specific_path) = self.path_receiver.try_recv() {
+            match process_specific_path {
+                ProcessSpecificPath::JitdumpPath(jitdump_path) => {
                     // TODO: Detect which thread the jitdump file is opened on, and use that thread's
                     // thread handle so that the JitFunctionAdd markers are put on that thread in the profile.
                     self.jitdump_manager.add_jitdump_path(
@@ -581,7 +584,7 @@ impl TaskProfiler {
                         None,
                     );
                 }
-                JitdumpOrMarkerPath::MarkerFilePath(marker_file_path) => {
+                ProcessSpecificPath::MarkerFilePath(marker_file_path) => {
                     // count the number of - characters in marker_file_path
                     let marker_info = marker_file::parse_marker_file_path(&marker_file_path);
                     let thread_handle = if marker_info.tid.is_some() {
@@ -595,6 +598,13 @@ impl TaskProfiler {
                     };
                     self.marker_file_paths
                         .push((thread_handle, marker_file_path));
+                }
+                ProcessSpecificPath::DotnetTracePath(dotnet_trace_path) => {
+                    self.dotnet_trace_manager.add_dotnet_trace_path(
+                        self.main_thread_handle,
+                        dotnet_trace_path,
+                        None,
+                    );
                 }
             }
         }
@@ -641,12 +651,22 @@ impl TaskProfiler {
         } else {
             None
         };
-        let jitdump_lib_ops = self.jitdump_manager.finish(
+        let mut jitdump_lib_ops = self.jitdump_manager.finish(
             jit_category_manager,
             profile,
             self.jit_function_recycler.as_mut(),
             &self.timestamp_converter,
         );
+
+        let dotnet_lib_ops = self.dotnet_trace_manager.finish(
+            jit_category_manager,
+            profile,
+            self.jit_function_recycler.as_mut(),
+            &self.timestamp_converter,
+        );
+
+        jitdump_lib_ops.extend(dotnet_lib_ops);
+
         let mut marker_spans = Vec::new();
         for (thread_handle, marker_file_path) in self.marker_file_paths {
             if let Ok(marker_spans_from_this_file) =

@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::chrome_etw_flags::KeywordNames;
+use super::coreclr::CoreClrContext;
 use super::winutils;
 use crate::shared::context_switch::{
     ContextSwitchHandler, OffCpuSampleGroup, ThreadContextSwitchData,
@@ -1838,6 +1839,24 @@ impl ProfileContext {
         );
 
         self.profile
+    }
+
+    pub fn convert_raw_timestamp(&self, ts_raw: u64) -> Timestamp {
+        self.timestamp_converter.convert_time(ts_raw)
+    }
+
+    pub fn add_thread_marker(
+        &mut self,
+        tid: u32,
+        timing: MarkerTiming,
+        known_category: KnownCategory,
+        name: &str,
+        marker: impl ProfilerMarker,
+    ) -> MarkerHandle {
+        let thread = self.threads.get_mut(&tid).unwrap();
+        let category = self.categories.get(known_category, &mut self.profile);
+        self.profile
+            .add_marker(thread.handle, category, name, marker, timing)
     }
 }
 
