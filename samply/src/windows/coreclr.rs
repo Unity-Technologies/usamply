@@ -392,7 +392,10 @@ pub fn handle_coreclr_event(
         coreclr_context.props.event_stacks,
     );
 
-    if !context.is_interesting_process(s.process_id(), None, None) {
+    let pid = s.process_id();
+    let tid = s.thread_id();
+
+    if !context.is_interesting_process(pid, None, None) {
         return;
     }
 
@@ -409,9 +412,6 @@ pub fn handle_coreclr_event(
             panic!("Unexpected event {}", s.name())
         }
     }
-
-    let pid = s.process_id();
-    let tid = s.thread_id();
 
     // TODO -- we may need to use the rundown provider if we trace running processes
     // https://learn.microsoft.com/en-us/dotnet/framework/performance/clr-etw-providers
@@ -545,9 +545,11 @@ pub fn handle_coreclr_event(
             handled = true;
         }
         ("GarbageCollection", gc_event) => {
-            if !is_in_time_range {
+            // if we're not in the range, or if the thread isn't recorded (because --main-thread-only)
+            if !is_in_time_range || !context.has_thread(tid) {
                 return;
             }
+
             match gc_event {
                 "GCSampledObjectAllocation" => {
                     if !gc_allocs {
