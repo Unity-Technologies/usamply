@@ -364,6 +364,9 @@ pub fn handle_coreclr_event(
         coreclr_context.props.event_stacks,
     );
 
+    let pid = s.process_id();
+    let tid = s.thread_id();
+
     let timestamp_raw = s.timestamp() as u64;
 
     let mut name_parts = s.name().splitn(3, '/');
@@ -377,9 +380,6 @@ pub fn handle_coreclr_event(
             panic!("Unexpected event {}", s.name())
         }
     }
-
-    let pid = s.process_id();
-    let tid = s.thread_id();
 
     // TODO -- we may need to use the rundown provider if we trace running processes
     // https://learn.microsoft.com/en-us/dotnet/framework/performance/clr-etw-providers
@@ -515,9 +515,11 @@ pub fn handle_coreclr_event(
             handled = true;
         }
         ("GarbageCollection", gc_event) => {
-            if !is_in_time_range {
+            // if we're not in the range, or if the thread isn't recorded (because --main-thread-only)
+            if !is_in_time_range || !context.has_thread_at_time(tid, timestamp_raw) {
                 return;
             }
+
             match gc_event {
                 "GCSampledObjectAllocation" => {
                     if !gc_allocs {
