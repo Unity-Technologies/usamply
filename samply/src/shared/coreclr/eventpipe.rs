@@ -27,10 +27,25 @@ pub fn eventpipe_event_to_coreclr_event(
 
     match event {
         EventPipeEvent::ModuleLoad(event) => {
-            eprintln!("ModuleLoad: {:?}", event);
-            None
+            Some(CoreClrEvent::ModuleLoad(super::ModuleLoadUnloadEvent {
+                common,
+                module_id: event.module_id,
+                assembly_id: event.assembly_id,
+                app_domain_id: event.app_domain_id,
+                module_il_path: event.module_il_path.to_string(),
+                module_native_path: event.module_native_path.to_string(),
+            }))
         }
-        EventPipeEvent::ModuleUnload(_) => None,
+        EventPipeEvent::ModuleUnload(event) => {
+            Some(CoreClrEvent::ModuleUnload(super::ModuleLoadUnloadEvent {
+                common,
+                module_id: event.module_id,
+                assembly_id: event.assembly_id,
+                app_domain_id: event.app_domain_id,
+                module_il_path: event.module_il_path.to_string(),
+                module_native_path: event.module_native_path.to_string(),
+            }))
+        }
         EventPipeEvent::ReadyToRunGetEntryPoint(method) => {
             let name = if method.method_name.is_empty() {
                 format!("JIT[0x{:x}]", method.entry_point)
@@ -55,8 +70,21 @@ pub fn eventpipe_event_to_coreclr_event(
             } else {
                 method.method_name.to_string()
             };
+            let tier = (method.method_flags >> 7) & 0x7;
+            let tier = match tier {
+                1 => super::MethodCompilationTier::MinOptJitted,
+                2 => super::MethodCompilationTier::Optimized,
+                3 => super::MethodCompilationTier::QuickJitted,
+                4 => super::MethodCompilationTier::OptimizedTier1,
+                5 => super::MethodCompilationTier::OptimizedTier1OSR,
+                6 => super::MethodCompilationTier::InstrumentedTier,
+                7 => super::MethodCompilationTier::InstrumentedTierOptimized,
+                _ => super::MethodCompilationTier::Unknown,
+            };
+
             Some(CoreClrEvent::MethodLoad(super::MethodLoadEvent {
                 common,
+                module_id: method.module_id,
                 start_address: method.method_start_address,
                 size: method.method_size,
                 name: CoreClrMethodName {
@@ -64,6 +92,40 @@ pub fn eventpipe_event_to_coreclr_event(
                     namespace: method.method_namespace.to_string(),
                     signature: method.method_signature.to_string(),
                 },
+                tier,
+                dc_end: false,
+            }))
+        }
+        EventPipeEvent::MethodDCEnd(method) => {
+            let name = if method.method_name.is_empty() {
+                format!("JIT[0x{:x}]", method.method_start_address)
+            } else {
+                method.method_name.to_string()
+            };
+            let tier = (method.method_flags >> 7) & 0x7;
+            let tier = match tier {
+                1 => super::MethodCompilationTier::MinOptJitted,
+                2 => super::MethodCompilationTier::Optimized,
+                3 => super::MethodCompilationTier::QuickJitted,
+                4 => super::MethodCompilationTier::OptimizedTier1,
+                5 => super::MethodCompilationTier::OptimizedTier1OSR,
+                6 => super::MethodCompilationTier::InstrumentedTier,
+                7 => super::MethodCompilationTier::InstrumentedTierOptimized,
+                _ => super::MethodCompilationTier::Unknown,
+            };
+
+            Some(CoreClrEvent::MethodLoad(super::MethodLoadEvent {
+                common,
+                module_id: method.module_id,
+                start_address: method.method_start_address,
+                size: method.method_size,
+                name: CoreClrMethodName {
+                    name,
+                    namespace: method.method_namespace.to_string(),
+                    signature: method.method_signature.to_string(),
+                },
+                tier,
+                dc_end: true,
             }))
         }
         EventPipeEvent::MethodUnload(method) => {

@@ -50,9 +50,9 @@ pub fn coreclr_provider_args(props: CoreClrProviderProps) -> Vec<String> {
 
     // if we're attaching, ask for a rundown of method info at the start of collection
     let rundown_verbose_keywords = if props.is_attach {
-        CORECLR_LOADER_KEYWORD | CORECLR_JIT_KEYWORD | CORECLR_RUNDOWN_START_KEYWORD
+        CORECLR_LOADER_KEYWORD | CORECLR_JIT_KEYWORD | CORECLR_NGEN_KEYWORD | CORECLR_RUNDOWN_START_KEYWORD
     } else {
-        0
+        CORECLR_JIT_KEYWORD | CORECLR_NGEN_KEYWORD
     };
 
     if props.gc_detailed_allocs {

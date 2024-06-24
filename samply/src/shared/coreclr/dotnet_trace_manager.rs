@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use fxprof_processed_profile::{
 };
 use wholesym::samply_symbols::debug_id_and_code_id_for_jitdump;
 
-use super::{eventpipe_event_to_coreclr_event, CoreClrEvent};
+use super::{eventpipe_event_to_coreclr_event, CoreClrEvent, ModuleLoadUnloadEvent};
 
 pub struct DotnetTraceManager {
     pending_trace_paths: Vec<PathBuf>,
@@ -122,6 +123,8 @@ struct SingleDotnetTraceProcessor {
     lib_mapping_ops: LibMappingOpQueue,
     symbols: Vec<Symbol>,
 
+    modules: HashMap<u64, ModuleLoadUnloadEvent>,
+
     /// The relative_address of the next JIT function.
     ///
     /// We define the relative address space for Jitdump files as follows:
@@ -139,6 +142,7 @@ impl SingleDotnetTraceProcessor {
             lib_handle,
             lib_mapping_ops: Default::default(),
             symbols: Default::default(),
+            modules: Default::default(),
             cumulative_address: 0,
         }
     }
@@ -203,6 +207,15 @@ impl SingleDotnetTraceProcessor {
         timestamp_converter: &TimestampConverter,
     ) {
         match coreclr_event {
+            CoreClrEvent::ModuleLoad(event) => {
+                let module_id = event.module_id;
+                self.modules.insert(module_id, event.clone());
+            }
+            CoreClrEvent::ModuleUnload(event) => {
+                let module_id = event.module_id;
+                //if let Some(module) = self.modules.remove(&module_id) {
+                //}
+            }
             CoreClrEvent::MethodLoad(event) => {
                 let start_avma = event.start_address;
                 let end_avma = event.start_address + event.size as u64;
@@ -241,8 +254,19 @@ impl SingleDotnetTraceProcessor {
 
                 let (category, js_frame) =
                     jit_category_manager.classify_jit_symbol(&symbol_name, profile);
+                let start_ts = if event.dc_end {
+                    if let Some(module) = self.modules.get(&event.module_id) {
+                        module.common.timestamp
+                    } else {
+                        eprintln!("Module not found: {}", event.module_id);
+                        event.common.timestamp
+                    }
+                } else {
+                    event.common.timestamp
+                };
+
                 self.lib_mapping_ops.push(
-                    event.common.timestamp,
+                    start_ts,
                     LibMappingOp::Add(LibMappingAdd {
                         start_avma,
                         end_avma,
@@ -280,6 +304,7 @@ impl SingleDotnetTraceProcessor {
 
     pub fn finish(mut self, profile: &mut Profile) -> LibMappingOpQueue {
         self.close_and_commit_symbol_table(profile);
+        self.lib_mapping_ops.sort();
         self.lib_mapping_ops
     }
 }

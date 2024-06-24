@@ -139,6 +139,10 @@ impl LibMappingOpQueue {
     pub fn into_iter(self) -> LibMappingOpQueueIter {
         LibMappingOpQueueIter(self.0.into_iter().peekable())
     }
+
+    pub fn sort(&mut self) {
+        self.0.sort_by_key(|(timestamp, _)| *timestamp);
+    }
 }
 
 pub struct LibMappingOpQueueIter(Peekable<std::vec::IntoIter<(u64, LibMappingOp)>>);

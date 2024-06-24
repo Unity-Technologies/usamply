@@ -181,23 +181,20 @@ pub enum CoreClrEvent {
     GcAllocationTick(GcAllocationTickEvent),
     GcSampledObjectAllocation(GcSampledObjectAllocationEvent),
     ReadyToRunGetEntryPoint(ReadyToRunGetEntryPointEvent),
+    MethodDCEnd(MethodLoadUnloadEvent),
 }
 
 pub fn decode_coreclr_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
-    if event.provider_name != "Microsoft-Windows-DotNETRuntime"
-        && event.provider_name != "Microsoft-Windows-DotNETRuntimeRundown"
-    {
-        return None;
-    }
-
-    let is_rundown = event.provider_name.ends_with("Rundown");
     match event.provider_name.as_str() {
-        "Microsoft-Windows-DotNETRuntime" => {}
-        //"Microsoft-Windows-DotNETRuntimeRundown" => decode_coreclr_event(event, payload),
-        _ => return None,
+        "Microsoft-Windows-DotNETRuntime" => decode_coreclr_regular_event(event),
+        "Microsoft-Windows-DotNETRuntimeRundown" => decode_coreclr_rundown_event(event),
+        _ => None,
     }
+}
 
+fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
     let mut payload = Cursor::new(&event.payload);
+    //eprintln!("Regular: {:?}", event.event_id);
 
     match event.event_id {
         // 151: DomainModuleLoad
@@ -337,6 +334,24 @@ pub fn decode_coreclr_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
         // 155: AssemblyUnload
         // 156: AppDomainLoad
         // 157: AppDomainUnload
+        _ => None,
+    }
+}
+
+fn decode_coreclr_rundown_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
+    let mut payload = Cursor::new(&event.payload);
+
+    //eprintln!("RUNDOWN: {:?}", event.event_id);
+    match event.event_id {
+        144 => {
+            // MethodDCStartVerbose | MethodDCEndVerbose
+            let ev = MethodLoadUnloadEvent::read_le_args(
+                &mut payload,
+                binrw::args! { version: event.event_version, verbose: true },
+            )
+            .unwrap();
+            Some(CoreClrEvent::MethodDCEnd(ev))
+        }
         _ => None,
     }
 }
