@@ -19,7 +19,7 @@ pub use super::mach_ipc::{mach_port_t, MachError, OsIpcSender};
 use super::mach_ipc::{mach_task_self, BlockingMode, OsIpcMultiShotServer, MACH_PORT_NULL};
 
 pub trait RootTaskRunner {
-    fn run_root_task(&self) -> Result<ExitStatus, MachError>;
+    fn run_root_task(&mut self) -> Result<ExitStatus, MachError>;
 }
 
 pub struct TaskLauncher {
@@ -30,7 +30,7 @@ pub struct TaskLauncher {
 }
 
 impl RootTaskRunner for TaskLauncher {
-    fn run_root_task(&self) -> Result<ExitStatus, MachError> {
+    fn run_root_task(&mut self) -> Result<ExitStatus, MachError> {
         // Ignore Ctrl+C while the subcommand is running. The signal still reaches the process
         // under observation while we continue to record it. (ctrl+c will send the SIGINT signal
         // to all processes in the foreground process group).
@@ -266,10 +266,11 @@ impl AcceptedTask {
 
 pub struct ExistingProcessRunner {
     pid: u32,
+    aux_child: Option<Child>,
 }
 
 impl RootTaskRunner for ExistingProcessRunner {
-    fn run_root_task(&self) -> Result<ExitStatus, MachError> {
+    fn run_root_task(&mut self) -> Result<ExitStatus, MachError> {
         let ctrl_c_receiver = CtrlC::observe_oneshot();
 
         eprintln!("Profiling {}, press Ctrl-C to stop...", self.pid);
@@ -277,6 +278,14 @@ impl RootTaskRunner for ExistingProcessRunner {
         ctrl_c_receiver
             .blocking_recv()
             .expect("Ctrl+C receiver failed");
+
+        if let Some(aux_child) = self.aux_child.as_mut() {
+            let aux_pid = aux_child.id();
+            unsafe {
+                libc::kill(aux_pid as i32, libc::SIGINT);
+            }
+            aux_child.wait().expect("Failed to wait on aux child process");
+        }
 
         eprintln!("Done.");
 
@@ -318,6 +327,15 @@ impl ExistingProcessRunner {
 
         // TODO: find all its children
 
-        ExistingProcessRunner { pid }
+        ExistingProcessRunner { pid, aux_child: None }
+    }
+
+    pub fn new_with_aux_child(pid: u32, task_accepter: &mut TaskAccepter, aux_child: Child) -> ExistingProcessRunner {
+        let runner = Self::new(pid, task_accepter);
+
+        ExistingProcessRunner {
+            aux_child: Some(aux_child),
+            ..runner
+        }
     }
 }

@@ -8,6 +8,7 @@ binrw = "0.13.3"
 bitflags = "2.4.2"
 num-traits = "0.2"
 num-derive = "0.4"
+log = "0.4.21"
 
 [[example]]
 name = "dump-nettrace"

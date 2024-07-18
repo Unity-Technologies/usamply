@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use serde_derive::{Deserialize, Serialize};
 
+use super::coreclr::CoreClrProviderProps;
+
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct CoreClrProfileProps {
     pub enabled: bool,
@@ -20,6 +22,16 @@ impl CoreClrProfileProps {
             || self.gc_suspensions
             || self.gc_detailed_allocs
             || self.event_stacks
+    }
+
+    pub fn to_provider_props(&self) -> CoreClrProviderProps {
+        CoreClrProviderProps {
+            event_stacks: self.event_stacks,
+            gc_markers: self.gc_markers,
+            gc_suspensions: self.gc_suspensions,
+            gc_detailed_allocs: self.gc_detailed_allocs,
+            is_attach: false,
+        }
     }
 }
 

@@ -193,7 +193,13 @@ impl SingleDotnetTraceProcessor {
                     self.close_and_commit_symbol_table(profile);
                     return;
                 }
-                _ => {}
+                Err(err) => {
+                    eprintln!("Got error: {:?}", err);
+                    self.lib_mapping_ops
+                        .push(last_timestamp, LibMappingOp::Clear);
+                    self.close_and_commit_symbol_table(profile);
+                    return;
+                }
             }
         }
     }
@@ -247,7 +253,7 @@ impl SingleDotnetTraceProcessor {
                         (self.lib_handle, relative_address_at_start)
                     };
 
-                eprintln!(
+                log::trace!(
                     "MethodLoad: addr = 0x{:x} symbol_name = {:?} size = {}",
                     start_avma, symbol_name, event.size
                 );
@@ -258,7 +264,7 @@ impl SingleDotnetTraceProcessor {
                     if let Some(module) = self.modules.get(&event.module_id) {
                         module.common.timestamp
                     } else {
-                        eprintln!("Module not found: {}", event.module_id);
+                        log::trace!("Module already unloaded {}, using event timestamp...", event.module_id);
                         event.common.timestamp
                     }
                 } else {

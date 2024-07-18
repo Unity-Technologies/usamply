@@ -330,10 +330,15 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
         // 85: ThreadCreated
         // 86: ThreadTerminated
         // 87: ThreadDomainEnter
+        // 145: MethodJittingStarted
+        // 146: MethodJitMemoryAllocatedForCode
         // 154: AssemblyLoad
         // 155: AssemblyUnload
         // 156: AppDomainLoad
         // 157: AppDomainUnload
+        // 160: R2RGetEntryPointStart
+        // 187: RuntimeInformationStart
+        // 190: MethodILToNativeMap
         _ => None,
     }
 }

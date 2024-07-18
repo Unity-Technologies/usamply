@@ -2,7 +2,8 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufWriter;
-use std::process::ExitStatus;
+use std::path::PathBuf;
+use std::process::{ExitStatus, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -33,7 +34,7 @@ pub fn start_recording(
 
     let mut task_accepter = TaskAccepter::new()?;
 
-    let root_task_runner: Box<dyn RootTaskRunner> = match recording_mode {
+    let mut root_task_runner: Box<dyn RootTaskRunner> = match recording_mode {
         RecordingMode::All => {
             eprintln!("Error: Profiling all processes is not supported on macOS.");
             eprintln!("You can only profile processes which you launch via samply, or attach to via --pid.");
@@ -42,7 +43,32 @@ pub fn start_recording(
         RecordingMode::Pid(pid) => {
             profile_name = format!("pid {pid}");
 
-            Box::new(ExistingProcessRunner::new(pid, &mut task_accepter))
+            if profile_creation_props.coreclr.any_enabled() {
+                let coreclr_props = CoreClrProviderProps {
+                    is_attach: true,
+                    ..profile_creation_props.coreclr.to_provider_props()
+                };
+
+                let provider_args = crate::shared::coreclr::coreclr_provider_args(coreclr_props);
+
+                let child = std::process::Command::new("dotnet-trace")
+                    .arg("collect")
+                    .arg("-p")
+                    .arg(pid.to_string())
+                    .arg("-o")
+                    .arg("profile.dottrace")
+                    .arg("--providers")
+                    .arg(&provider_args.join(","))
+                    .stdout(Stdio::null())
+                    .spawn()
+                    .expect("Failed to spawn dotnet-trace");
+
+                task_accepter.queue_received_stuff(ReceivedStuff::DotnetTracePath(pid, PathBuf::from("profile.dottrace")));
+
+                Box::new(ExistingProcessRunner::new_with_aux_child(pid, &mut task_accepter, child))
+            } else {
+                Box::new(ExistingProcessRunner::new(pid, &mut task_accepter))
+            }
         }
         RecordingMode::Launch(process_launch_props) => {
             profile_name = process_launch_props
@@ -68,11 +94,8 @@ pub fn start_recording(
                 //}
 
                 let coreclr_props = CoreClrProviderProps {
-                    event_stacks: profile_creation_props.coreclr.event_stacks,
-                    gc_markers: profile_creation_props.coreclr.gc_markers,
-                    gc_suspensions: profile_creation_props.coreclr.gc_suspensions,
-                    gc_detailed_allocs: profile_creation_props.coreclr.gc_detailed_allocs,
                     is_attach: false,
+                    ..profile_creation_props.coreclr.to_provider_props()
                 };
                 let provider_args = crate::shared::coreclr::coreclr_provider_args(coreclr_props);
 

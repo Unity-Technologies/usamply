@@ -93,7 +93,7 @@ pub struct NettraceTraceObject {
     sync_time_utc: NettraceTime,
     sync_time_qpc: u64,
     qpc_frequency: u64,
-    pointer_suze: u32,
+    pointer_size: u32,
     process_id: u32,
     number_of_processors: u32,
     expected_cpu_sampling_rate: u32,
@@ -629,7 +629,7 @@ where
             match obj_type_name {
                 "Trace" => {
                     let trace_object = NettraceTraceObject::read(&mut self.stream)?;
-                    eprintln!("Trace: {:?}", trace_object);
+                    log::trace!("Trace: {:?}", trace_object);
                     self.trace_info = Some(trace_object.clone());
                 }
                 "MetadataBlock" => {
