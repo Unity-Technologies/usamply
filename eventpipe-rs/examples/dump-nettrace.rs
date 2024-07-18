@@ -1,8 +1,8 @@
 #![allow(unused)]
 use std::fs::File;
 
-use coreclr_events::CoreClrEvent;
 use eventpipe::*;
+use eventpipe::coreclr::CoreClrEvent;
 
 // https://github.com/microsoft/perfview/blob/main/src/TraceEvent/EventPipe/EventPipeFormat.md
 
@@ -15,9 +15,9 @@ fn main() {
     loop {
         match reader.next_event() {
             Ok(Some(event)) => {
-                if event.provider_name == "Microsoft-DotNETCore-SampleProfiler" {
-                    continue;
-                }
+                //if event.provider_name == "Microsoft-DotNETCore-SampleProfiler" {
+                //    continue;
+                //}
 
                 match eventpipe::decode_event(&event) {
                     DecodedEvent::CoreClrEvent(coreclr_event) => {
@@ -36,10 +36,28 @@ fn main() {
                             CoreClrEvent::GcAllocationTick(event) => {
                                 //println!("GcAllocationTick: {:?}", event);
                             }
+                            CoreClrEvent::ModuleLoad(event) => {
+                                println!("ModuleLoad: {:?}", event);
+                            }
+                            CoreClrEvent::ModuleUnload(event) => {
+                                println!("ModuleUnload: {:?}", event);
+                            }
+                            CoreClrEvent::MethodUnload(event) => {
+                                println!("MethodUnload: {:?}", event);
+                            }
+                            CoreClrEvent::GcSampledObjectAllocation(event) => {
+                                println!("GcSampledObjectAllocation: {:?}", event);
+                            }
+                            CoreClrEvent::ReadyToRunGetEntryPoint(event) => {
+                                println!("ReadyToRunGetEntryPoint: {:?}", event);
+                            }
+                            CoreClrEvent::MethodDCEnd(event) => {
+                                println!("MethodDCEnd: {:?}", event);
+                            }
                         }
                     }
                     DecodedEvent::UnknownEvent => {
-                        //println!("Unknown event: {} / {}", event.provider_name, event.event_id);
+                        println!("Unknown: {} / {}", event.provider_name, event.event_id);
                     }
                 }
 
