@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::{Read, Seek};
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use framehop::{Module, Unwinder};
@@ -27,7 +27,8 @@ pub enum Error {
 pub fn convert<C: Read + Seek>(
     cursor: C,
     file_mod_time: Option<SystemTime>,
-    extra_dir: Option<&Path>,
+    binary_lookup_dirs: Vec<PathBuf>,
+    aux_file_lookup_dirs: Vec<PathBuf>,
     profile_creation_props: ProfileCreationProps,
 ) -> Result<Profile, Error> {
     let perf_file = PerfFileReader::parse_file(cursor)?;
@@ -40,7 +41,8 @@ pub fn convert<C: Read + Seek>(
             convert_impl::<framehop::aarch64::UnwinderAarch64<MmapRangeOrVec>, ConvertRegsAarch64, _>(
                 perf_file,
                 file_mod_time,
-                extra_dir,
+                binary_lookup_dirs,
+                aux_file_lookup_dirs,
                 cache,
                 profile_creation_props,
             )
@@ -56,7 +58,8 @@ pub fn convert<C: Read + Seek>(
             convert_impl::<framehop::x86_64::UnwinderX86_64<MmapRangeOrVec>, ConvertRegsX86_64, _>(
                 perf_file,
                 file_mod_time,
-                extra_dir,
+                binary_lookup_dirs,
+                aux_file_lookup_dirs,
                 cache,
                 profile_creation_props,
             )
@@ -68,7 +71,8 @@ pub fn convert<C: Read + Seek>(
 fn convert_impl<U, C, R>(
     file: PerfFileReader<R>,
     file_mod_time: Option<SystemTime>,
-    extra_dir: Option<&Path>,
+    binary_lookup_dirs: Vec<PathBuf>,
+    aux_file_lookup_dirs: Vec<PathBuf>,
     cache: U::Cache,
     profile_creation_props: ProfileCreationProps,
 ) -> Profile
@@ -89,28 +93,8 @@ where
         .map_or(0, |r| r.first_sample_time);
     let endian = perf_file.endian();
     let simpleperf_meta_info = perf_file.simpleperf_meta_info().ok().flatten();
-    let mut product_postfix = String::new();
-    if let Some(host) = perf_file.hostname().ok().flatten() {
-        write!(product_postfix, " on {host}").unwrap();
-    } else if let Some(product_props) = simpleperf_meta_info
-        .as_ref()
-        .and_then(|mi| mi.get("product_props"))
-    {
-        // Example: "Google:Pixel 6:oriole"
-        write!(product_postfix, " on").unwrap();
-        for fragment in product_props.split(':').take(2) {
-            write!(product_postfix, " {fragment}").unwrap();
-        }
-    }
-
-    if let Some(perf_version) = perf_file.perf_version().ok().flatten() {
-        write!(product_postfix, " (perf version {perf_version})").unwrap();
-    } else if let Some(android_version) = simpleperf_meta_info
-        .as_ref()
-        .and_then(|mi| mi.get("android_version"))
-    {
-        write!(product_postfix, " (Android {android_version})").unwrap();
-    }
+    let is_simpleperf = simpleperf_meta_info.is_some();
+    let call_chain_return_addresses_are_preadjusted = is_simpleperf;
 
     let linux_version = perf_file.os_release().unwrap();
     let attributes = perf_file.event_attributes();
@@ -132,19 +116,76 @@ where
         ReferenceTimestamp::from_system_time(SystemTime::now())
     };
 
+    let (profile_name, mut profile_name_postfix_for_first_process) = if let Some(profile_name) =
+        profile_creation_props.profile_name.clone()
+    {
+        // The user gave us an explicit profile name. Use it.
+        (profile_name, None)
+    } else if let Some(simpleperf_meta_info) = simpleperf_meta_info.as_ref() {
+        // perf.data from simpleperf
+        let mut profile_name_postfix = String::new();
+        if let Some(profile_name_props) = simpleperf_meta_info.get("product_props") {
+            // Example: "Google:Pixel 6:oriole"
+            let fragments: Vec<&str> = profile_name_props.split(':').take(2).collect();
+            if !fragments.is_empty() {
+                let device_name = fragments.join(" ");
+                write!(profile_name_postfix, " on {device_name}").unwrap();
+            }
+        }
+        if let Some(app_package_name) = simpleperf_meta_info.get("app_package_name") {
+            // We were profiling a single app.
+            (format!("{app_package_name}{profile_name_postfix}"), None)
+        } else {
+            // We would like the profile name to start with the name of the process / app
+            // that has been profiled. However, we don't know this name yet.
+            // Start with the name of the imported perf.data file, but also store the
+            // profile name "postfix" so that we can change the profile name later, once
+            // we see the first profiled process.
+            let imported_file_filename = profile_creation_props.fallback_profile_name.clone();
+            let initial_profile_name = format!("{imported_file_filename}{profile_name_postfix}");
+            (initial_profile_name, Some(profile_name_postfix))
+        }
+    } else {
+        // perf.data from Linux perf
+        let mut profile_name_postfix = String::new();
+        if let Some(host) = perf_file.hostname().ok().flatten() {
+            write!(profile_name_postfix, " on {host}").unwrap();
+        }
+        if let Some(perf_version) = perf_file.perf_version().ok().flatten() {
+            write!(profile_name_postfix, " (perf version {perf_version})").unwrap();
+        }
+        // We would like the profile name to start with the name of the process / executable
+        // that has been profiled. However, we don't know this name yet.
+        // Start with the name of the imported perf.data file, but also store the
+        // profile name "postfix" so that we can change the profile name later, once
+        // we see the first profiled process.
+        let imported_file_filename = profile_creation_props.fallback_profile_name.clone();
+        let initial_profile_name = format!("{imported_file_filename}{profile_name_postfix}");
+        (initial_profile_name, Some(profile_name_postfix))
+    };
+
     let mut converter = Converter::<U>::new(
         &profile_creation_props,
         reference_timestamp,
-        Some(Box::new(move |name| format!("{name}{product_postfix}"))),
+        &profile_name,
         build_ids,
         linux_version,
         first_sample_time,
         endian,
         cache,
-        extra_dir,
+        binary_lookup_dirs,
+        aux_file_lookup_dirs,
         interpretation.clone(),
         simpleperf_symbol_tables,
+        call_chain_return_addresses_are_preadjusted,
     );
+
+    if let Some(android_version) = simpleperf_meta_info
+        .as_ref()
+        .and_then(|mi| mi.get("android_version"))
+    {
+        converter.set_os_name(&format!("Android {android_version}"));
+    }
 
     let mut last_timestamp = 0;
 
@@ -189,6 +230,15 @@ where
                 converter.handle_fork(e);
             }
             EventRecord::Comm(e) => {
+                if profile_name_postfix_for_first_process.is_some()
+                    && &e.name.as_slice()[..] != b"perf-exec"
+                {
+                    let postfix = profile_name_postfix_for_first_process.take().unwrap();
+                    let first_process_name =
+                        String::from_utf8_lossy(&e.name.as_slice()).to_string();
+                    let profile_name = format!("{first_process_name}{postfix}");
+                    converter.set_profile_name(&profile_name);
+                }
                 converter.handle_comm(e, record.timestamp());
             }
             EventRecord::Exit(e) => {

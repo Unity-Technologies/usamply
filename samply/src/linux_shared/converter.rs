@@ -8,8 +8,9 @@ use debugid::DebugId;
 use framehop::{ExplicitModuleSectionInfo, FrameAddress, Module, Unwinder};
 use fxprof_processed_profile::{
     CategoryColor, CategoryHandle, CategoryPairHandle, CpuDelta, LibraryHandle, LibraryInfo,
-    MarkerDynamicField, MarkerFieldFormat, MarkerLocation, MarkerSchemaField, MarkerTiming,
-    Profile, ProfilerMarker, ReferenceTimestamp, SamplingInterval, SymbolTable, ThreadHandle,
+    MarkerFieldFormat, MarkerFieldSchema, MarkerLocation, MarkerSchema, MarkerTiming, Profile,
+    ReferenceTimestamp, SamplingInterval, StaticSchemaMarker, StringHandle, SymbolTable,
+    ThreadHandle,
 };
 use linux_perf_data::simpleperf_dso_type::{DSO_DEX_FILE, DSO_KERNEL, DSO_KERNEL_MODULE};
 use linux_perf_data::{
@@ -24,7 +25,6 @@ use linux_perf_event_reader::{
 use memmap2::Mmap;
 use object::{CompressedFileRange, CompressionFormat, Object, ObjectSection};
 use samply_symbols::{debug_id_for_object, DebugIdExt};
-use serde_json::json;
 use wholesym::samply_symbols::demangle_any;
 use wholesym::{samply_symbols, CodeId, ElfBuildId};
 
@@ -43,19 +43,19 @@ use super::vdso::VdsoObject;
 use crate::shared::context_switch::{ContextSwitchHandler, OffCpuSampleGroup};
 use crate::shared::jit_category_manager::JitCategoryManager;
 use crate::shared::lib_mappings::{AndroidArtInfo, LibMappingInfo};
+use crate::shared::process_name::make_process_name;
 use crate::shared::process_sample_data::{
     OtherEventMarker, RssStatMarker, RssStatMember, SchedSwitchMarkerOnCpuTrack,
     SchedSwitchMarkerOnThreadTrack,
 };
 use crate::shared::recording_props::ProfileCreationProps;
+use crate::shared::synthetic_jit_library::SyntheticJitLibrary;
 use crate::shared::timestamp_converter::TimestampConverter;
 use crate::shared::types::{StackFrame, StackMode};
 use crate::shared::unresolved_samples::{
     UnresolvedSamples, UnresolvedStackHandle, UnresolvedStacks,
 };
 use crate::shared::utils::open_file_with_fallback;
-
-pub type BoxedProductNameGenerator = Box<dyn FnOnce(&str) -> String>;
 
 pub struct Converter<U>
 where
@@ -68,9 +68,9 @@ where
     current_sample_time: u64,
     build_ids: HashMap<DsoKey, DsoInfo>,
     endian: Endianness,
-    delayed_product_name_generator: Option<BoxedProductNameGenerator>,
     linux_version: Option<String>,
-    extra_binary_artifact_dir: Option<PathBuf>,
+    binary_lookup_dirs: Vec<PathBuf>,
+    aux_file_lookup_dirs: Vec<PathBuf>,
     context_switch_handler: ContextSwitchHandler,
     unresolved_stacks: UnresolvedStacks,
     off_cpu_weight_per_sample: i32,
@@ -79,15 +79,30 @@ where
     kernel_symbols: Option<KernelSymbols>,
     kernel_image_mapping: Option<KernelImageMapping>,
     simpleperf_symbol_tables_user: HashMap<Vec<u8>, SymbolTableFromSimpleperf>,
+    simpleperf_symbol_tables_jit: HashMap<Vec<u8>, Vec<SimpleperfSymbol>>,
     simpleperf_symbol_tables_kernel_image: Option<Vec<SimpleperfSymbol>>,
     simpleperf_symbol_tables_kernel_modules: HashMap<Vec<u8>, SymbolTableFromSimpleperf>,
+    simpleperf_jit_app_cache_library: SyntheticJitLibrary,
     pe_mappings: PeMappings,
     jit_category_manager: JitCategoryManager,
+    arg_count_to_include_in_process_name: usize,
     cpus: Option<Cpus>,
 
     /// Whether repeated frames at the base of the stack should be folded
     /// into one frame.
     fold_recursive_prefix: bool,
+
+    /// Determines how the addresses in sample call chains should be interpreted.
+    /// Any addresses after the first frame address are either "return addresses"
+    /// (i.e. they are the address of the instruction *after* the call instruction),
+    /// or they are "adjusted return address" (i.e. an offset was subtracted from
+    /// the return address so that the address now points *into the call instruction*).
+    /// For call chains coming directly from the Linux kernel, no adjustment has been
+    /// performed, so this will be false.
+    /// For call chains coming from simpleperf perf.data files, simpleperf has
+    /// already done the adjusting, either by adjusting the call chains coming from
+    /// the kernel or by doing its own unwinding with an adjusting unwinder,
+    call_chain_return_addresses_are_preadjusted: bool,
 }
 
 const DEFAULT_OFF_CPU_SAMPLING_INTERVAL_NS: u64 = 1_000_000; // 1ms
@@ -100,25 +115,26 @@ where
     pub fn new(
         profile_creation_props: &ProfileCreationProps,
         reference_timestamp: ReferenceTimestamp,
-        delayed_product_name_generator: Option<BoxedProductNameGenerator>,
+        profile_name: &str,
         build_ids: HashMap<DsoKey, DsoInfo>,
         linux_version: Option<&str>,
         first_sample_time: u64,
         endian: Endianness,
         cache: U::Cache,
-        extra_binary_artifact_dir: Option<&Path>,
+        binary_lookup_dirs: Vec<PathBuf>,
+        aux_file_lookup_dirs: Vec<PathBuf>,
         interpretation: EventInterpretation,
         simpleperf_symbol_tables: Option<Vec<SimpleperfFileRecord>>,
+        call_chain_return_addresses_are_preadjusted: bool,
     ) -> Self {
         let interval = match interpretation.sampling_is_time_based {
             Some(nanos) => SamplingInterval::from_nanos(nanos),
             None => SamplingInterval::from_millis(1),
         };
-        let mut profile = Profile::new(
-            &profile_creation_props.profile_name,
-            reference_timestamp,
-            interval,
-        );
+        let mut profile = Profile::new(profile_name, reference_timestamp, interval);
+        if let Some(linux_version) = linux_version {
+            profile.set_os_name(&format!("Linux {linux_version}"));
+        }
         let (off_cpu_sampling_interval_ns, off_cpu_weight_per_sample) =
             match &interpretation.sampling_is_time_based {
                 Some(interval_ns) => (*interval_ns, 1),
@@ -133,55 +149,74 @@ where
         };
 
         let mut simpleperf_symbol_tables_user = HashMap::new();
+        let mut simpleperf_symbol_tables_jit = HashMap::new();
         let mut simpleperf_symbol_tables_kernel_image = None;
         let mut simpleperf_symbol_tables_kernel_modules = HashMap::new();
+        let simpleperf_jit_category: CategoryPairHandle = profile
+            .add_category("JIT app cache", CategoryColor::Green)
+            .into();
+        let allow_jit_function_recycling = profile_creation_props.reuse_threads;
+        let simpleperf_jit_app_cache_library = SyntheticJitLibrary::new(
+            "JIT app cache".to_string(),
+            simpleperf_jit_category,
+            &mut profile,
+            allow_jit_function_recycling,
+        );
         if let Some(simpleperf_symbol_tables) = simpleperf_symbol_tables {
             let dex_category: CategoryPairHandle =
                 profile.add_category("DEX", CategoryColor::Green).into();
             let oat_category: CategoryPairHandle =
                 profile.add_category("OAT", CategoryColor::Green).into();
             for f in simpleperf_symbol_tables {
+                if f.r#type == DSO_KERNEL {
+                    simpleperf_symbol_tables_kernel_image = Some(f.symbol);
+                    continue;
+                }
+
                 let path = f.path.clone().into_bytes();
+                if is_simpleperf_jit_path(&f.path) {
+                    simpleperf_symbol_tables_jit.insert(path, f.symbol);
+                    continue;
+                }
+
+                let is_jit = false;
                 let (category, art_info) = if f.path.ends_with(".oat") {
-                    (Some(oat_category), Some(AndroidArtInfo::DexOrOat))
-                } else if f.r#type == DSO_DEX_FILE {
-                    (Some(dex_category), Some(AndroidArtInfo::DexOrOat))
+                    (Some(oat_category), Some(AndroidArtInfo::JavaFrame))
+                } else if f.r#type == DSO_DEX_FILE || f.path.ends_with(".odex") || is_jit {
+                    (Some(dex_category), Some(AndroidArtInfo::JavaFrame))
                 } else if f.path.ends_with("libart.so") {
                     (None, Some(AndroidArtInfo::LibArt))
                 } else {
                     (None, None)
                 };
-                if f.r#type == DSO_KERNEL {
-                    simpleperf_symbol_tables_kernel_image = Some(f.symbol);
-                } else {
-                    let file_offset_of_min_vaddr_in_elf_file = match f.type_specific_msg {
-                        Some(SimpleperfTypeSpecificInfo::ElfFile(elf)) => {
-                            Some(elf.file_offset_of_min_vaddr)
-                        }
-                        _ => None,
-                    };
-                    let symbols: Vec<_> = f
-                        .symbol
-                        .iter()
-                        .map(|s| fxprof_processed_profile::Symbol {
-                            address: s.vaddr as u32,
-                            size: Some(s.len),
-                            name: demangle_any(&s.name),
-                        })
-                        .collect();
-                    let symbol_table = SymbolTable::new(symbols);
-                    let symbol_table = SymbolTableFromSimpleperf {
-                        file_offset_of_min_vaddr_in_elf_file,
-                        min_vaddr: f.min_vaddr,
-                        symbol_table: Arc::new(symbol_table),
-                        category,
-                        art_info,
-                    };
-                    if f.r#type == DSO_KERNEL_MODULE {
-                        simpleperf_symbol_tables_kernel_modules.insert(path, symbol_table);
-                    } else {
-                        simpleperf_symbol_tables_user.insert(path, symbol_table);
+
+                let (min_vaddr, file_offset_of_min_vaddr_in_elf_file) = match f.type_specific_msg {
+                    Some(SimpleperfTypeSpecificInfo::ElfFile(elf)) => {
+                        (f.min_vaddr, Some(elf.file_offset_of_min_vaddr))
                     }
+                    _ => (f.min_vaddr, None),
+                };
+                let symbols: Vec<_> = f
+                    .symbol
+                    .iter()
+                    .map(|s| fxprof_processed_profile::Symbol {
+                        address: s.vaddr as u32,
+                        size: Some(s.len),
+                        name: demangle_any(&s.name),
+                    })
+                    .collect();
+                let symbol_table = SymbolTable::new(symbols);
+                let symbol_table = SymbolTableFromSimpleperf {
+                    file_offset_of_min_vaddr_in_elf_file,
+                    min_vaddr,
+                    symbol_table: Arc::new(symbol_table),
+                    category,
+                    art_info,
+                };
+                if f.r#type == DSO_KERNEL_MODULE {
+                    simpleperf_symbol_tables_kernel_modules.insert(path, symbol_table);
+                } else {
+                    simpleperf_symbol_tables_user.insert(path, symbol_table);
                 }
             }
         }
@@ -209,9 +244,9 @@ where
             current_sample_time: first_sample_time,
             build_ids,
             endian,
-            delayed_product_name_generator,
             linux_version: linux_version.map(ToOwned::to_owned),
-            extra_binary_artifact_dir: extra_binary_artifact_dir.map(ToOwned::to_owned),
+            binary_lookup_dirs,
+            aux_file_lookup_dirs,
             off_cpu_weight_per_sample,
             context_switch_handler: ContextSwitchHandler::new(off_cpu_sampling_interval_ns),
             unresolved_stacks: UnresolvedStacks::default(),
@@ -220,17 +255,24 @@ where
             kernel_symbols,
             kernel_image_mapping: None,
             simpleperf_symbol_tables_user,
+            simpleperf_symbol_tables_jit,
             simpleperf_symbol_tables_kernel_image,
             simpleperf_symbol_tables_kernel_modules,
+            simpleperf_jit_app_cache_library,
             pe_mappings: PeMappings::new(),
             jit_category_manager: JitCategoryManager::new(),
             fold_recursive_prefix: profile_creation_props.fold_recursive_prefix,
+            arg_count_to_include_in_process_name: profile_creation_props
+                .arg_count_to_include_in_process_name,
             cpus,
+            call_chain_return_addresses_are_preadjusted,
         }
     }
 
     pub fn finish(mut self) -> Profile {
         let mut profile = self.profile;
+        self.simpleperf_jit_app_cache_library
+            .finish_and_set_symbol_table(&mut profile);
         self.processes.finish(
             &mut profile,
             &self.unresolved_stacks,
@@ -238,6 +280,14 @@ where
             &self.timestamp_converter,
         );
         profile
+    }
+
+    pub fn set_profile_name(&mut self, profile_name: &str) {
+        self.profile.set_product(profile_name);
+    }
+
+    pub fn set_os_name(&mut self, os_name: &str) {
+        self.profile.set_os_name(os_name);
     }
 
     pub fn handle_main_event_sample<C: ConvertRegs<UnwindRegs = U::UnwindRegs>>(
@@ -271,6 +321,7 @@ where
             &mut self.cache,
             &mut stack,
             self.fold_recursive_prefix,
+            self.call_chain_return_addresses_are_preadjusted,
         );
 
         let thread = process.threads.get_thread_by_tid(tid, &mut self.profile);
@@ -389,6 +440,7 @@ where
             &mut self.cache,
             &mut stack,
             self.fold_recursive_prefix,
+            self.call_chain_return_addresses_are_preadjusted,
         );
 
         let stack_index = self
@@ -414,10 +466,8 @@ where
             let timestamp = self.timestamp_converter.convert_time(timestamp_mono);
             let marker_handle = self.profile.add_marker(
                 cpu.thread_handle,
-                CategoryHandle::OTHER,
-                "sched_switch",
-                SchedSwitchMarkerOnCpuTrack,
                 MarkerTiming::Instant(timestamp),
+                SchedSwitchMarkerOnCpuTrack,
             );
             process.unresolved_samples.attach_stack_to_marker(
                 cpu.thread_handle,
@@ -428,10 +478,8 @@ where
             );
             let marker_handle = self.profile.add_marker(
                 thread.profile_thread,
-                CategoryHandle::OTHER,
-                "sched_switch",
-                SchedSwitchMarkerOnThreadTrack { cpu: cpu_index },
                 MarkerTiming::Instant(timestamp),
+                SchedSwitchMarkerOnThreadTrack { cpu: cpu_index },
             );
             process.unresolved_samples.attach_stack_to_marker(
                 thread.profile_thread,
@@ -504,6 +552,7 @@ where
             &mut self.cache,
             &mut stack,
             self.fold_recursive_prefix,
+            self.call_chain_return_addresses_are_preadjusted,
         );
         let unresolved_stack = self.unresolved_stacks.convert(stack.into_iter().rev());
         let thread_handle = process.threads.main_thread.profile_thread;
@@ -514,12 +563,11 @@ where
             RssStatMember::AnonymousSwapEntries => "RSS Stat SHMEMPAGES",
             RssStatMember::ResidentSharedMemoryPages => "RSS Stat SWAPENTS",
         };
+        let name = self.profile.intern_string(name);
         let marker_handle = self.profile.add_marker(
             thread_handle,
-            CategoryHandle::OTHER,
-            name,
-            RssStatMarker(rss_stat.size, delta),
             timing,
+            RssStatMarker::new(name, rss_stat.size, delta),
         );
         process.unresolved_samples.attach_stack_to_marker(
             thread_handle,
@@ -555,6 +603,7 @@ where
             &mut self.cache,
             &mut stack,
             self.fold_recursive_prefix,
+            self.call_chain_return_addresses_are_preadjusted,
         );
 
         let thread_handle = match e.tid {
@@ -570,13 +619,10 @@ where
         let unresolved_stack = self.unresolved_stacks.convert(stack.into_iter().rev());
         if let Some(name) = self.event_names.get(attr_index) {
             let timing = MarkerTiming::Instant(timestamp);
-            let marker_handle = self.profile.add_marker(
-                thread_handle,
-                CategoryHandle::OTHER,
-                name,
-                OtherEventMarker,
-                timing,
-            );
+            let name = self.profile.intern_string(name);
+            let marker_handle =
+                self.profile
+                    .add_marker(thread_handle, timing, OtherEventMarker(name));
             process.unresolved_samples.attach_stack_to_marker(
                 thread_handle,
                 timestamp,
@@ -612,6 +658,7 @@ where
         cache: &mut U::Cache,
         stack: &mut Vec<StackFrame>,
         fold_recursive_prefix: bool,
+        call_chain_return_addresses_are_preadjusted: bool,
     ) {
         stack.truncate(0);
 
@@ -630,10 +677,12 @@ where
                     continue;
                 }
 
-                let stack_frame = match is_first_frame {
-                    true => StackFrame::InstructionPointer(address, mode),
-                    false => StackFrame::ReturnAddress(address, mode),
-                };
+                let stack_frame =
+                    match (is_first_frame, call_chain_return_addresses_are_preadjusted) {
+                        (true, _) => StackFrame::InstructionPointer(address, mode),
+                        (false, false) => StackFrame::ReturnAddress(address, mode),
+                        (false, true) => StackFrame::AdjustedReturnAddress(address, mode),
+                    };
                 stack.push(stack_frame);
 
                 is_first_frame = false;
@@ -743,6 +792,12 @@ where
             return;
         }
 
+        const PROT_SIMPLEPERF_JIT_MAPPING: u32 = 0x4000;
+        if e.protection & PROT_SIMPLEPERF_JIT_MAPPING != 0 {
+            self.add_simpleperf_jit_mapping(e, timestamp);
+            return;
+        }
+
         if e.page_offset == 0 {
             self.pe_mappings.check_mmap(&path, e.address);
         }
@@ -802,7 +857,7 @@ where
             process.jitdump_manager.add_jitdump_path(
                 profile_thread,
                 jitdump_path,
-                self.extra_binary_artifact_dir.clone(),
+                self.aux_file_lookup_dirs.clone(),
             );
             return true;
         }
@@ -815,7 +870,7 @@ where
             process.add_marker_file_path(
                 profile_thread,
                 marker_file_path,
-                self.extra_binary_artifact_dir.clone(),
+                self.aux_file_lookup_dirs.clone(),
             );
             return true;
         }
@@ -994,6 +1049,72 @@ where
     }
 
     pub fn handle_comm(&mut self, e: CommOrExecRecord, timestamp: Option<u64>) {
+        if e.is_execve {
+            self.handle_exec(e, timestamp, None);
+        } else {
+            self.handle_thread_rename(e, timestamp);
+        }
+    }
+
+    pub fn handle_exec(
+        &mut self,
+        e: CommOrExecRecord,
+        timestamp: Option<u64>,
+        exec_name_and_cmdline: Option<(String, Vec<String>)>,
+    ) {
+        let is_main = e.pid == e.tid;
+        let comm_name = String::from_utf8_lossy(&e.name.as_slice()).to_string();
+
+        // If the COMM record doesn't have a timestamp, take the last seen
+        // timestamp from the previous sample.
+        let timestamp_mono = match timestamp {
+            Some(0) | None => self.current_sample_time,
+            Some(ts) => ts,
+        };
+        let timestamp = self.timestamp_converter.convert_time(timestamp_mono);
+
+        let name = if let Some((exec_name, args)) = exec_name_and_cmdline {
+            make_process_name(&exec_name, args, self.arg_count_to_include_in_process_name)
+        } else {
+            comm_name.clone()
+        };
+
+        // eprintln!("Process execve: pid={}, tid={}, new name: {}", e.pid, e.tid, name);
+
+        // Mark the old thread / process as ended.
+        if is_main {
+            self.processes.remove(
+                e.pid,
+                timestamp,
+                &mut self.profile,
+                &mut self.jit_category_manager,
+                &self.timestamp_converter,
+            );
+            self.processes.recycle_or_get_new(
+                e.pid,
+                Some(name.to_string()),
+                timestamp,
+                &mut self.profile,
+            );
+        } else {
+            eprintln!(
+                "Unexpected is_execve on non-main thread! pid: {}, tid: {}",
+                e.pid, e.tid
+            );
+            let process = self.processes.get_by_pid(e.pid, &mut self.profile);
+            process
+                .threads
+                .remove_non_main_thread(e.tid, timestamp, &mut self.profile);
+            process.recycle_or_get_new_thread(
+                e.tid,
+                Some(name.to_string()),
+                timestamp,
+                &mut self.profile,
+            );
+        }
+    }
+
+    pub fn handle_thread_rename(&mut self, e: CommOrExecRecord, timestamp: Option<u64>) {
         let is_main = e.pid == e.tid;
         let name = e.name.as_slice();
         let name = String::from_utf8_lossy(&name);
@@ -1006,47 +1127,7 @@ where
         };
         let timestamp = self.timestamp_converter.convert_time(timestamp_mono);
 
-        if is_main && self.delayed_product_name_generator.is_some() && name != "perf-exec" {
-            let generator = self.delayed_product_name_generator.take().unwrap();
-            let product = generator(&name);
-            self.profile.set_product(&product);
-        }
-
-        if e.is_execve {
-            // eprintln!("Process execve: pid={}, tid={}, new name: {}", e.pid, e.tid, name);
-
-            // Mark the old thread / process as ended.
-            if is_main {
-                self.processes.remove(
-                    e.pid,
-                    timestamp,
-                    &mut self.profile,
-                    &mut self.jit_category_manager,
-                    &self.timestamp_converter,
-                );
-                self.processes.recycle_or_get_new(
-                    e.pid,
-                    Some(name.to_string()),
-                    timestamp,
-                    &mut self.profile,
-                );
-            } else {
-                eprintln!(
-                    "Unexpected is_execve on non-main thread! pid: {}, tid: {}",
-                    e.pid, e.tid
-                );
-                let process = self.processes.get_by_pid(e.pid, &mut self.profile);
-                process
-                    .threads
-                    .remove_non_main_thread(e.tid, timestamp, &mut self.profile);
-                process.recycle_or_get_new_thread(
-                    e.tid,
-                    Some(name.to_string()),
-                    timestamp,
-                    &mut self.profile,
-                );
-            }
-        } else if is_main {
+        if is_main {
             // eprintln!("Process rename: pid={}, new name: {}", e.pid, name);
             self.processes
                 .rename_process(e.pid, timestamp, name.to_string(), &mut self.profile);
@@ -1063,6 +1144,28 @@ where
     }
 
     #[allow(unused)]
+    pub fn register_existing_process(
+        &mut self,
+        pid: i32,
+        comm_name: &str,
+        exe_name: &str,
+        args: Vec<String>,
+    ) {
+        let process = self.processes.get_by_pid(pid, &mut self.profile);
+        let process_handle = process.profile_process;
+
+        let name = make_process_name(exe_name, args, self.arg_count_to_include_in_process_name);
+        self.profile.set_process_name(process_handle, &name);
+        process.name = Some(name.to_owned());
+
+        // Mark this as the start time of the new thread / process.
+        let time = self
+            .timestamp_converter
+            .convert_time(self.current_sample_time);
+        self.profile.set_process_start_time(process_handle, time);
+    }
+
+    #[allow(unused)]
     pub fn register_existing_thread(&mut self, pid: i32, tid: i32, name: &str) {
         let is_main = pid == tid;
 
@@ -1074,25 +1177,12 @@ where
 
         self.profile.set_thread_name(thread_handle, name);
         thread.name = Some(name.to_owned());
-        if is_main {
-            self.profile.set_process_name(process_handle, name);
-            process.name = Some(name.to_owned());
-        }
 
         // Mark this as the start time of the new thread / process.
         let time = self
             .timestamp_converter
             .convert_time(self.current_sample_time);
         self.profile.set_thread_start_time(thread_handle, time);
-        if is_main {
-            self.profile.set_process_start_time(process_handle, time);
-        }
-
-        if self.delayed_product_name_generator.is_some() && name != "perf-exec" {
-            let generator = self.delayed_product_name_generator.take().unwrap();
-            let product = generator(name);
-            self.profile.set_product(&product);
-        }
     }
 
     fn add_kernel_module(
@@ -1108,9 +1198,7 @@ where
             (None, Some(kernel_symbols)) if kernel_symbols.base_avma == base_address => {
                 Some(kernel_symbols.build_id.clone())
             }
-            (None, _) => {
-                kernel_module_build_id(Path::new(&path), self.extra_binary_artifact_dir.as_deref())
-            }
+            (None, _) => kernel_module_build_id(Path::new(&path), &self.binary_lookup_dirs),
             (Some(build_id), _) => Some(build_id.to_owned()),
         };
         let debug_id = build_id
@@ -1214,6 +1302,36 @@ where
         }
     }
 
+    fn add_simpleperf_jit_mapping(&mut self, e: Mmap2Record, timestamp_raw: u64) {
+        let path = e.path.as_slice();
+        let address = e.address;
+        let mapping_size = e.length;
+        let (name, len) = self
+            .get_simpleperf_jit_function_name(&path, address)
+            .unwrap_or_else(|| (format!("jit_fun_{address:x}"), mapping_size as u32));
+
+        let process = self.processes.get_by_pid(e.pid, &mut self.profile);
+        let synthetic_lib = &mut self.simpleperf_jit_app_cache_library;
+        let info = LibMappingInfo::new_java_mapping(
+            synthetic_lib.lib_handle(),
+            Some(synthetic_lib.default_category()),
+        );
+        process.add_jit_function(timestamp_raw, synthetic_lib, name, address, len, info);
+    }
+
+    fn get_simpleperf_jit_function_name(
+        &self,
+        path_slice: &[u8],
+        start_avma: u64,
+    ) -> Option<(String, u32)> {
+        let symbols = self.simpleperf_symbol_tables_jit.get(path_slice)?;
+        let index = symbols
+            .binary_search_by_key(&start_avma, |sym| sym.vaddr)
+            .ok()?;
+        let sym = &symbols[index];
+        Some((sym.name.clone(), sym.len))
+    }
+
     /// Tell the unwinder and the profile about this module.
     ///
     /// The unwinder needs to know about it in case we need to do DWARF stack
@@ -1251,10 +1369,7 @@ where
         let mut file = None;
         let mut path = mapping_info.path.to_string_lossy().to_string();
 
-        if let Ok((f, p)) = open_file_with_fallback(
-            &mapping_info.path,
-            self.extra_binary_artifact_dir.as_deref(),
-        ) {
+        if let Ok((f, p)) = open_file_with_fallback(&mapping_info.path, &self.binary_lookup_dirs) {
             // Fix up bad files from `perf inject --jit`.
             if let Some((fixed_file, fixed_path)) = correct_bad_perf_jit_so_file(&f, &path) {
                 file = Some(fixed_file);
@@ -1316,8 +1431,8 @@ where
             });
             let info = match symbol_table.art_info {
                 Some(AndroidArtInfo::LibArt) => LibMappingInfo::new_libart_mapping(lib_handle),
-                Some(AndroidArtInfo::DexOrOat) => {
-                    LibMappingInfo::new_dex_or_oat_mapping(lib_handle, symbol_table.category)
+                Some(AndroidArtInfo::JavaFrame) => {
+                    LibMappingInfo::new_java_mapping(lib_handle, symbol_table.category)
                 }
                 None => LibMappingInfo::new_lib(lib_handle),
             };
@@ -1603,14 +1718,13 @@ where
         let thread = process.threads.get_thread_by_tid(tid, &mut self.profile);
         let timestamp = timestamp.max(self.timestamp_converter.reference_raw);
         let timestamp = self.timestamp_converter.convert_time(timestamp);
-        let path = String::from_utf8_lossy(path_slice).into_owned();
-        let marker = MmapMarker(path);
+        let path = self
+            .profile
+            .intern_string(&String::from_utf8_lossy(path_slice));
         self.profile.add_marker(
             thread.profile_thread,
-            CategoryHandle::OTHER,
-            "mmap",
-            marker,
             MarkerTiming::Instant(timestamp),
+            MmapMarker(path),
         );
     }
 }
@@ -1668,6 +1782,21 @@ fn process_off_cpu_sample_group(
             None,
         );
     }
+}
+
+/// Returns true for paths such as the following:
+///  - "/data/local/tmp/perf.data_jit_app_cache:1039560-1040440"
+///  - "./TemporaryFile-osHvVs" (used by older versions of simpleperf, e.g. on Android 11)
+fn is_simpleperf_jit_path(path: &str) -> bool {
+    let path = match path.rsplit_once(':') {
+        Some((base_path, _range)) => base_path,
+        None => path,
+    };
+    let name = match path.rfind('/') {
+        Some(pos) => &path[pos + 1..],
+        None => path,
+    };
+    name.ends_with("_jit_app_cache") || name.starts_with("TemporaryFile-")
 }
 
 struct MappingInfo {
@@ -1754,31 +1883,40 @@ fn path_from_unix_bytes(path_slice: &[u8]) -> Option<&Path> {
     Some(Path::new(std::str::from_utf8(path_slice).ok()?))
 }
 
-struct MmapMarker(String);
+struct MmapMarker(StringHandle);
 
-impl ProfilerMarker for MmapMarker {
-    const MARKER_TYPE_NAME: &'static str = "mmap";
-
-    fn json_marker_data(&self) -> serde_json::Value {
-        json!({
-            "type": Self::MARKER_TYPE_NAME,
-            "name": self.0
-        })
-    }
-
-    fn schema() -> fxprof_processed_profile::MarkerSchema {
-        fxprof_processed_profile::MarkerSchema {
-            type_name: Self::MARKER_TYPE_NAME,
+impl StaticSchemaMarker for MmapMarker {
+    const UNIQUE_MARKER_TYPE_NAME: &'static str = "mmap";
+    fn schema() -> MarkerSchema {
+        MarkerSchema {
+            type_name: Self::UNIQUE_MARKER_TYPE_NAME.into(),
             locations: vec![MarkerLocation::MarkerChart, MarkerLocation::MarkerTable],
-            chart_label: Some("{marker.data.name}"),
-            tooltip_label: Some("{marker.name} - {marker.data.name}"),
-            table_label: Some("{marker.name} - {marker.data.name}"),
-            fields: vec![MarkerSchemaField::Dynamic(MarkerDynamicField {
-                key: "name",
-                label: "Details",
+            chart_label: Some("{marker.data.name}".into()),
+            tooltip_label: Some("{marker.name} - {marker.data.name}".into()),
+            table_label: Some("{marker.name} - {marker.data.name}".into()),
+            fields: vec![MarkerFieldSchema {
+                key: "name".into(),
+                label: "Details".into(),
                 format: MarkerFieldFormat::String,
                 searchable: true,
-            })],
+            }],
+            static_fields: vec![],
         }
+    }
+
+    fn name(&self, profile: &mut Profile) -> StringHandle {
+        profile.intern_string("mmap")
+    }
+
+    fn category(&self, _profile: &mut Profile) -> CategoryHandle {
+        CategoryHandle::OTHER
+    }
+
+    fn string_field_value(&self, _field_index: u32) -> StringHandle {
+        self.0
+    }
+
+    fn number_field_value(&self, _field_index: u32) -> f64 {
+        unreachable!()
     }
 }

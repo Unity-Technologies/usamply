@@ -30,8 +30,13 @@ pub struct RecordingProps {
     pub output_file: PathBuf,
     pub time_limit: Option<Duration>,
     pub interval: Duration,
+    #[allow(dead_code)]
     pub vm_hack: bool,
+    #[allow(dead_code)]
     pub gfx: bool,
+    #[allow(dead_code)]
+    pub browsers: bool,
+    #[allow(dead_code)]
     pub keep_etl: bool,
 }
 
@@ -58,11 +63,13 @@ impl RecordingMode {
 }
 
 /// Properties which are meaningful both for recording a profile and
-/// for converting a perf.data file to a profile.
+/// for converting a perf.data / ETL file to a profile.
 #[derive(Debug, Clone)]
 pub struct ProfileCreationProps {
-    pub profile_name: String,
+    pub profile_name: Option<String>,
+    pub fallback_profile_name: String,
     /// Only include the main thread of each process.
+    #[allow(dead_code)]
     pub main_thread_only: bool,
     /// Merge non-overlapping threads of the same name.
     pub reuse_threads: bool,
@@ -72,17 +79,30 @@ pub struct ProfileCreationProps {
     pub unlink_aux_files: bool,
     /// Create a separate thread for each CPU.
     pub create_per_cpu_threads: bool,
+    /// Include up to N command line arguments in the process name
+    pub arg_count_to_include_in_process_name: usize,
     /// Override system architecture.
     #[allow(dead_code)]
     pub override_arch: Option<String>,
     /// Dump presymbolication info.
     pub unstable_presymbolicate: bool,
     /// CoreCLR specific properties.
+    #[allow(dead_code)]
     pub coreclr: CoreClrProfileProps,
     /// Create markers for unknown events.
+    #[allow(dead_code)]
     pub unknown_event_markers: bool,
-    pub tstart: Option<u32>,
-    pub tstop: Option<u32>,
+    /// Time range to include, relative to start of recording.
+    #[allow(dead_code)]
+    pub time_range: Option<(std::time::Duration, std::time::Duration)>,
+}
+
+impl ProfileCreationProps {
+    pub fn profile_name(&self) -> &str {
+        self.profile_name
+            .as_deref()
+            .unwrap_or(&self.fallback_profile_name)
+    }
 }
 
 /// Properties which are meaningful for launching and recording a fresh process.

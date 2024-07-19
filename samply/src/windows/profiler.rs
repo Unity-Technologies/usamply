@@ -1,25 +1,18 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 use std::fs::File;
-use std::io::BufWriter;
-use std::ops::DerefMut;
 use std::os::windows::process::ExitStatusExt;
-use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
-use std::sync::atomic::AtomicPtr;
-use std::sync::{Arc, Mutex};
 
 use fxprof_processed_profile::{Profile, ReferenceTimestamp, SamplingInterval};
-use serde_json::to_writer;
 
+use super::etw_gecko;
 use super::profile_context::ProfileContext;
-use super::{etw_gecko, winutils};
 use crate::server::{start_server_main, ServerProps};
 use crate::shared::ctrl_c::CtrlC;
 use crate::shared::included_processes::IncludedProcesses;
 use crate::shared::recording_props::{ProfileCreationProps, RecordingMode, RecordingProps};
-use crate::windows::elevated_helper::{self, ElevatedHelperSession};
+use crate::shared::save_profile::save_profile_to_file;
+use crate::shared::symbol_props::SymbolProps;
+use crate::windows::elevated_helper::ElevatedHelperSession;
 
 // Hello intrepid explorer! You may be in this code because you'd like to extend something,
 // or are trying to figure out how various ETW things work. It's not the easiest API!
@@ -51,13 +44,14 @@ pub fn start_recording(
     recording_mode: RecordingMode,
     recording_props: RecordingProps,
     profile_creation_props: ProfileCreationProps,
+    symbol_props: SymbolProps,
     server_props: Option<ServerProps>,
 ) -> Result<ExitStatus, i32> {
     let timebase = std::time::SystemTime::now();
     let timebase = ReferenceTimestamp::from_system_time(timebase);
 
     let profile = Profile::new(
-        &profile_creation_props.profile_name,
+        profile_creation_props.profile_name(),
         timebase,
         SamplingInterval::from_nanos(1000000), // will be replaced with correct interval from file later
     );
@@ -132,7 +126,7 @@ pub fn start_recording(
 
     eprintln!("Stopping xperf...");
 
-    let merged_etl = elevated_helper
+    let (kernel_output_file, user_output_file) = elevated_helper
         .stop_xperf()
         .expect("Should have produced a merged ETL file");
 
@@ -150,26 +144,41 @@ pub fn start_recording(
     let unstable_presymbolicate = profile_creation_props.unstable_presymbolicate;
     let mut context =
         ProfileContext::new(profile, &arch, included_processes, profile_creation_props);
-    etw_gecko::profile_pid_from_etl_file(&mut context, &merged_etl);
+    let extra_etls = match &user_output_file {
+        Some(user_etl) => vec![user_etl.clone()],
+        None => Vec::new(),
+    };
+    etw_gecko::process_etl_files(&mut context, &kernel_output_file, &extra_etls);
+
+    if let Some(win_version) = winver::WindowsVersion::detect() {
+        context.set_os_name(&format!("Windows {win_version}"))
+    }
+
     let profile = context.finish();
 
     if !recording_props.keep_etl {
-        std::fs::remove_file(&merged_etl).unwrap_or_else(|_| {
+        std::fs::remove_file(&kernel_output_file).unwrap_or_else(|_| {
             panic!(
                 "Failed to delete ETL file {:?}",
-                merged_etl.to_str().unwrap()
+                kernel_output_file.to_str().unwrap()
             )
         });
+        if let Some(user_output_file) = &user_output_file {
+            std::fs::remove_file(user_output_file).unwrap_or_else(|_| {
+                panic!(
+                    "Failed to delete ETL file {:?}",
+                    user_output_file.to_str().unwrap()
+                )
+            });
+        }
     } else {
-        eprintln!("ETL path: {:?}", merged_etl);
+        eprintln!("ETL path: {}", kernel_output_file.to_str().unwrap());
+        if let Some(user_output_file) = &user_output_file {
+            eprintln!("User ETL path: {}", user_output_file.to_str().unwrap());
+        }
     }
 
-    // write the profile to a json file
-    let file = File::create(&output_file).unwrap();
-    let writer = BufWriter::new(file);
-    {
-        to_writer(writer, &profile).expect("Couldn't write JSON");
-    }
+    save_profile_to_file(&profile, &output_file).expect("Couldn't write JSON");
 
     if unstable_presymbolicate {
         crate::shared::symbol_precog::presymbolicate(
@@ -186,7 +195,7 @@ pub fn start_recording(
         )
         .expect("Couldn't parse libinfo map from profile file");
 
-        start_server_main(&output_file, server_props, libinfo_map);
+        start_server_main(&output_file, server_props, symbol_props, libinfo_map);
     }
 
     Ok(ExitStatus::from_raw(0))

@@ -5,8 +5,8 @@ use assert_json_diff::assert_json_eq;
 use debugid::DebugId;
 use fxprof_processed_profile::{
     CategoryColor, CategoryHandle, CpuDelta, Frame, FrameFlags, FrameInfo, LibraryInfo,
-    MarkerDynamicField, MarkerFieldFormat, MarkerLocation, MarkerSchema, MarkerSchemaField,
-    MarkerStaticField, MarkerTiming, Profile, ProfilerMarker, ReferenceTimestamp, SamplingInterval,
+    MarkerFieldFormat, MarkerFieldSchema, MarkerLocation, MarkerSchema, MarkerStaticField,
+    MarkerTiming, Profile, ReferenceTimestamp, SamplingInterval, StaticSchemaMarker, StringHandle,
     Symbol, SymbolTable, Timestamp,
 };
 use serde_json::json;
@@ -15,94 +15,121 @@ use serde_json::json;
 
 /// An example marker type with some text content.
 #[derive(Debug, Clone)]
-pub struct TextMarker(pub String);
+pub struct TextMarker {
+    pub name: StringHandle,
+    pub text: StringHandle,
+}
 
-impl ProfilerMarker for TextMarker {
-    const MARKER_TYPE_NAME: &'static str = "Text";
-
-    fn json_marker_data(&self) -> serde_json::Value {
-        json!({
-            "type": Self::MARKER_TYPE_NAME,
-            "name": self.0
-        })
-    }
+impl StaticSchemaMarker for TextMarker {
+    const UNIQUE_MARKER_TYPE_NAME: &'static str = "Text";
 
     fn schema() -> MarkerSchema {
         MarkerSchema {
-            type_name: Self::MARKER_TYPE_NAME,
+            type_name: Self::UNIQUE_MARKER_TYPE_NAME.into(),
             locations: vec![MarkerLocation::MarkerChart, MarkerLocation::MarkerTable],
-            chart_label: Some("{marker.data.name}"),
+            chart_label: Some("{marker.data.name}".into()),
             tooltip_label: None,
-            table_label: Some("{marker.name} - {marker.data.name}"),
-            fields: vec![MarkerSchemaField::Dynamic(MarkerDynamicField {
-                key: "name",
-                label: "Details",
+            table_label: Some("{marker.name} - {marker.data.name}".into()),
+            fields: vec![MarkerFieldSchema {
+                key: "name".into(),
+                label: "Details".into(),
                 format: MarkerFieldFormat::String,
                 searchable: true,
-            })],
+            }],
+            static_fields: vec![],
         }
+    }
+
+    fn name(&self, _profile: &mut Profile) -> StringHandle {
+        self.name
+    }
+
+    fn category(&self, _profile: &mut Profile) -> CategoryHandle {
+        CategoryHandle::OTHER
+    }
+
+    fn string_field_value(&self, _field_index: u32) -> StringHandle {
+        self.text
+    }
+
+    fn number_field_value(&self, _field_index: u32) -> f64 {
+        unreachable!()
     }
 }
 
 #[test]
 fn profile_without_js() {
     struct CustomMarker {
-        event_name: String,
+        event_name: StringHandle,
         allocation_size: u32,
-        url: String,
+        url: StringHandle,
         latency: Duration,
     }
-    impl ProfilerMarker for CustomMarker {
-        const MARKER_TYPE_NAME: &'static str = "custom";
+    impl StaticSchemaMarker for CustomMarker {
+        const UNIQUE_MARKER_TYPE_NAME: &'static str = "custom";
 
         fn schema() -> MarkerSchema {
             MarkerSchema {
-                type_name: Self::MARKER_TYPE_NAME,
+                type_name: Self::UNIQUE_MARKER_TYPE_NAME.into(),
                 locations: vec![MarkerLocation::MarkerChart, MarkerLocation::MarkerTable],
                 chart_label: None,
-                tooltip_label: Some("Custom tooltip label"),
+                tooltip_label: Some("Custom tooltip label".into()),
                 table_label: None,
                 fields: vec![
-                    MarkerSchemaField::Dynamic(MarkerDynamicField {
-                        key: "eventName",
-                        label: "Event name",
+                    MarkerFieldSchema {
+                        key: "eventName".into(),
+                        label: "Event name".into(),
                         format: MarkerFieldFormat::String,
                         searchable: true,
-                    }),
-                    MarkerSchemaField::Dynamic(MarkerDynamicField {
-                        key: "allocationSize",
-                        label: "Allocation size",
+                    },
+                    MarkerFieldSchema {
+                        key: "allocationSize".into(),
+                        label: "Allocation size".into(),
                         format: MarkerFieldFormat::Bytes,
                         searchable: true,
-                    }),
-                    MarkerSchemaField::Dynamic(MarkerDynamicField {
-                        key: "url",
-                        label: "URL",
+                    },
+                    MarkerFieldSchema {
+                        key: "url".into(),
+                        label: "URL".into(),
                         format: MarkerFieldFormat::Url,
                         searchable: true,
-                    }),
-                    MarkerSchemaField::Dynamic(MarkerDynamicField {
-                        key: "latency",
-                        label: "Latency",
+                    },
+                    MarkerFieldSchema {
+                        key: "latency".into(),
+                        label: "Latency".into(),
                         format: MarkerFieldFormat::Duration,
                         searchable: true,
-                    }),
-                    MarkerSchemaField::Static(MarkerStaticField {
-                        label: "Description",
-                        value: "This is a test marker with a custom schema.",
-                    }),
+                    },
                 ],
+                static_fields: vec![MarkerStaticField {
+                    label: "Description".into(),
+                    value: "This is a test marker with a custom schema.".into(),
+                }],
             }
         }
 
-        fn json_marker_data(&self) -> serde_json::Value {
-            json!({
-                "type": Self::MARKER_TYPE_NAME,
-                "eventName": self.event_name,
-                "allocationSize": self.allocation_size,
-                "url": self.url,
-                "latency": self.latency.as_secs_f64() * 1000.0,
-            })
+        fn name(&self, profile: &mut Profile) -> StringHandle {
+            profile.intern_string("CustomName")
+        }
+
+        fn category(&self, _profile: &mut Profile) -> CategoryHandle {
+            CategoryHandle::OTHER
+        }
+
+        fn string_field_value(&self, field_index: u32) -> StringHandle {
+            match field_index {
+                0 => self.event_name,
+                2 => self.url,
+                _ => unreachable!(),
+            }
+        }
+
+        fn number_field_value(&self, field_index: u32) -> f64 {
+            match field_index {
+                1 => self.allocation_size.into(),
+                3 => self.latency.as_secs_f64() * 1000.0,
+                _ => unreachable!(),
+            }
         }
     }
 
@@ -111,6 +138,7 @@ fn profile_without_js() {
         ReferenceTimestamp::from_millis_since_unix_epoch(1636162232627.0),
         SamplingInterval::from_millis(1),
     );
+    profile.set_os_name("macOS 14.4");
     let process = profile.add_process("test", 123, Timestamp::from_millis_since_reference(0.0));
     let thread = profile.add_thread(
         process,
@@ -268,27 +296,28 @@ fn profile_without_js() {
         1,
     );
 
+    let text_marker = TextMarker {
+        name: profile.intern_string("Experimental"),
+        text: profile.intern_string("Hello world!"),
+    };
     profile.add_marker(
         thread,
-        CategoryHandle::OTHER,
-        "Experimental",
-        TextMarker("Hello world!".to_string()),
         MarkerTiming::Instant(Timestamp::from_millis_since_reference(0.0)),
+        text_marker,
     );
+    let custom_marker = CustomMarker {
+        event_name: profile.intern_string("My event"),
+        allocation_size: 512000,
+        url: profile.intern_string("https://mozilla.org/"),
+        latency: Duration::from_millis(123),
+    };
     profile.add_marker(
         thread,
-        CategoryHandle::OTHER,
-        "CustomName",
-        CustomMarker {
-            event_name: "My event".to_string(),
-            allocation_size: 512000,
-            url: "https://mozilla.org/".to_string(),
-            latency: Duration::from_millis(123),
-        },
         MarkerTiming::Interval(
             Timestamp::from_millis_since_reference(0.0),
             Timestamp::from_millis_since_reference(2.0),
         ),
+        custom_marker,
     );
 
     let memory_counter =
@@ -342,9 +371,10 @@ fn profile_without_js() {
                 "name": []
               },
               "interval": 1.0,
-              "preprocessedProfileVersion": 46,
+              "preprocessedProfileVersion": 49,
               "processType": 0,
               "product": "test",
+              "oscpu": "macOS 14.4",
               "sampleUnits": {
                 "eventDelay": "ms",
                 "threadCPUDelta": "µs",
@@ -370,7 +400,7 @@ fn profile_without_js() {
                     {
                       "key": "name",
                       "label": "Details",
-                      "format": "string",
+                      "format": "unique-string",
                       "searchable": true
                     }
                   ]
@@ -386,7 +416,7 @@ fn profile_without_js() {
                     {
                       "key": "eventName",
                       "label": "Event name",
-                      "format": "string",
+                      "format": "unique-string",
                       "searchable": true
                     },
                     {
@@ -618,24 +648,6 @@ fn profile_without_js() {
                     null,
                     null,
                     null
-                  ],
-                  "optimizations": [
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null
                   ]
                 },
                 "funcTable": {
@@ -775,15 +787,15 @@ fn profile_without_js() {
                   ],
                   "data": [
                     {
-                      "name": "Hello world!",
-                      "type": "Text"
+                      "type": "Text",
+                      "name": 19
                     },
                     {
-                      "allocationSize": 512000,
-                      "eventName": "My event",
-                      "latency": 123.0,
                       "type": "custom",
-                      "url": "https://mozilla.org/"
+                      "eventName": 21,
+                      "allocationSize": 512000.0,
+                      "url": "https://mozilla.org/",
+                      "latency": 123.0
                     }
                   ],
                   "endTime": [
@@ -792,7 +804,7 @@ fn profile_without_js() {
                   ],
                   "name": [
                     18,
-                    19
+                    20
                   ],
                   "phase": [
                     0,
@@ -856,6 +868,7 @@ fn profile_without_js() {
                 },
                 "samples": {
                   "length": 4,
+                  "weightType": "samples",
                   "stack": [
                     null,
                     6,
@@ -874,7 +887,6 @@ fn profile_without_js() {
                     1,
                     1
                   ],
-                  "weightType": "samples",
                   "threadCPUDelta": [
                     0,
                     0,
@@ -977,7 +989,9 @@ fn profile_without_js() {
                   "0x2778f4",
                   "libc_symbol_3",
                   "Experimental",
-                  "CustomName"
+                  "Hello world!",
+                  "CustomName",
+                  "My event"
                 ],
                 "tid": "12345",
                 "unregisterTime": null
@@ -992,29 +1006,24 @@ fn profile_without_js() {
                 "description": "Amount of allocated memory",
                 "mainThreadIndex": 0,
                 "pid": "123",
-                "sampleGroups": [
-                  {
-                    "id": 0,
-                    "samples": {
-                      "length": 3,
-                      "count": [
-                        0.0,
-                        1000.0,
-                        800.0
-                      ],
-                      "number": [
-                        0,
-                        2,
-                        1
-                      ],
-                      "time": [
-                        0.0,
-                        1.0,
-                        2.0
-                      ]
-                    }
-                  }
-                ]
+                "samples": {
+                  "length": 3,
+                  "count": [
+                    0.0,
+                    1000.0,
+                    800.0
+                  ],
+                  "number": [
+                    0,
+                    2,
+                    1
+                  ],
+                  "time": [
+                    0.0,
+                    1.0,
+                    2.0
+                  ]
+                }
               }
             ]
           }
@@ -1089,7 +1098,7 @@ fn profile_with_js() {
                 "name": []
               },
               "interval": 1.0,
-              "preprocessedProfileVersion": 46,
+              "preprocessedProfileVersion": 49,
               "processType": 0,
               "product": "test with js",
               "sampleUnits": {
@@ -1148,10 +1157,6 @@ fn profile_with_js() {
                     null
                   ],
                   "column": [
-                    null,
-                    null
-                  ],
-                  "optimizations": [
                     null,
                     null
                   ]
@@ -1349,7 +1354,7 @@ fn profile_counters_with_sorted_processes() {
                 "name": []
               },
               "interval": 1.0,
-              "preprocessedProfileVersion": 46,
+              "preprocessedProfileVersion": 49,
               "processType": 0,
               "product": "test",
               "sampleUnits": {
@@ -1380,8 +1385,7 @@ fn profile_counters_with_sorted_processes() {
                   "innerWindowID": [],
                   "implementation": [],
                   "line": [],
-                  "column": [],
-                  "optimizations": []
+                  "column": []
                 },
                 "funcTable": {
                   "length": 0,
@@ -1464,8 +1468,7 @@ fn profile_counters_with_sorted_processes() {
                   "innerWindowID": [],
                   "implementation": [],
                   "line": [],
-                  "column": [],
-                  "optimizations": []
+                  "column": []
                 },
                 "funcTable": {
                   "length": 0,
@@ -1546,23 +1549,18 @@ fn profile_counters_with_sorted_processes() {
                 "description": "Amount of allocated memory",
                 "mainThreadIndex": 1,
                 "pid": "123",
-                "sampleGroups": [
-                  {
-                    "id": 0,
-                    "samples": {
-                      "length": 1,
-                      "count": [
-                        0.0
-                      ],
-                      "number": [
-                        0
-                      ],
-                      "time": [
-                        1.0
-                      ]
-                    }
-                  }
-                ]
+                "samples": {
+                  "length": 1,
+                  "count": [
+                    0.0
+                  ],
+                  "number": [
+                    0
+                  ],
+                  "time": [
+                    1.0
+                  ]
+                }
               },
               {
                 "category": "Memory 2",
@@ -1570,23 +1568,18 @@ fn profile_counters_with_sorted_processes() {
                 "description": "Amount of allocated memory",
                 "mainThreadIndex": 1,
                 "pid": "123",
-                "sampleGroups": [
-                  {
-                    "id": 0,
-                    "samples": {
-                      "length": 1,
-                      "count": [
-                        0.0
-                      ],
-                      "number": [
-                        0
-                      ],
-                      "time": [
-                        0.0
-                      ]
-                    }
-                  }
-                ]
+                "samples": {
+                  "length": 1,
+                  "count": [
+                    0.0
+                  ],
+                  "number": [
+                    0
+                  ],
+                  "time": [
+                    0.0
+                  ]
+                }
               }
             ]
           }

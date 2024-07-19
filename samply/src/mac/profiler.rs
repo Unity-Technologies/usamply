@@ -1,13 +1,11 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::BufWriter;
 use std::process::ExitStatus;
 use std::thread;
 use std::time::Duration;
 
 use crossbeam_channel::unbounded;
-use serde_json::to_writer;
 
 use super::error::SamplingError;
 use super::process_launcher::{
@@ -19,16 +17,17 @@ use crate::server::{start_server_main, ServerProps};
 use crate::shared::recording_props::{
     ProcessLaunchProps, ProfileCreationProps, RecordingMode, RecordingProps,
 };
+use crate::shared::save_profile::save_profile_to_file;
+use crate::shared::symbol_props::SymbolProps;
 
 pub fn start_recording(
     recording_mode: RecordingMode,
     recording_props: RecordingProps,
-    profile_creation_props: ProfileCreationProps,
+    mut profile_creation_props: ProfileCreationProps,
+    symbol_props: SymbolProps,
     server_props: Option<ServerProps>,
 ) -> Result<ExitStatus, MachError> {
-    let mut unlink_aux_files = profile_creation_props.unlink_aux_files;
     let output_file = recording_props.output_file.clone();
-    let profile_name;
 
     let mut task_accepter = TaskAccepter::new()?;
 
@@ -38,17 +37,8 @@ pub fn start_recording(
             eprintln!("You can only profile processes which you launch via samply, or attach to via --pid.");
             std::process::exit(1)
         }
-        RecordingMode::Pid(pid) => {
-            profile_name = format!("pid {pid}");
-
-            Box::new(ExistingProcessRunner::new(pid, &mut task_accepter))
-        }
+        RecordingMode::Pid(pid) => Box::new(ExistingProcessRunner::new(pid, &mut task_accepter)),
         RecordingMode::Launch(process_launch_props) => {
-            profile_name = process_launch_props
-                .command_name
-                .to_string_lossy()
-                .to_string();
-
             let ProcessLaunchProps {
                 mut env_vars,
                 command_name,
@@ -63,7 +53,7 @@ pub fn start_recording(
                 // knows what they're doing and will specify the arg as needed.
                 if !env_vars.iter().any(|p| p.0 == "DOTNET_PerfMapEnabled") {
                     env_vars.push(("DOTNET_PerfMapEnabled".into(), "3".into()));
-                    unlink_aux_files = true;
+                    profile_creation_props.unlink_aux_files = true;
                 }
             }
 
@@ -79,22 +69,12 @@ pub fn start_recording(
         }
     };
 
-    let profile_creation_props = ProfileCreationProps {
-        unlink_aux_files,
-        ..profile_creation_props
-    };
-
     let unstable_presymbolicate = profile_creation_props.unstable_presymbolicate;
 
     let (task_sender, task_receiver) = unbounded();
 
     let sampler_thread = thread::spawn(move || {
-        let sampler = Sampler::new(
-            profile_name,
-            task_receiver,
-            recording_props,
-            profile_creation_props,
-        );
+        let sampler = Sampler::new(task_receiver, recording_props, profile_creation_props);
         sampler.run()
     });
 
@@ -204,12 +184,7 @@ pub fn start_recording(
         }
     };
 
-    {
-        // Write the profile to a file.
-        let file = File::create(&output_file).unwrap();
-        let writer = BufWriter::new(file);
-        to_writer(writer, &profile).expect("Couldn't write JSON");
-    }
+    save_profile_to_file(&profile, &output_file).expect("Couldn't write JSON");
 
     if unstable_presymbolicate {
         crate::shared::symbol_precog::presymbolicate(
@@ -225,7 +200,7 @@ pub fn start_recording(
         )
         .expect("Couldn't parse libinfo map from profile file");
 
-        start_server_main(&output_file, server_props, libinfo_map);
+        start_server_main(&output_file, server_props, symbol_props, libinfo_map);
     }
 
     Ok(exit_status)

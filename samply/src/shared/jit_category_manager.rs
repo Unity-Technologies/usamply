@@ -4,14 +4,16 @@ use fxprof_processed_profile::{
 
 #[derive(Debug, Clone, Copy)]
 pub enum JsFrame {
-    Regular(JsName),
+    #[allow(dead_code)]
+    NativeFrameIsJs,
+    RegularInAdditionToNativeFrame(JsName),
     BaselineInterpreterStub(JsName),
     BaselineInterpreter,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum JsName {
-    SelfHosted(StringHandle),
+    SelfHosted(#[allow(dead_code)] StringHandle),
     NonSelfHosted(StringHandle),
 }
 
@@ -33,6 +35,7 @@ impl JitCategoryManager {
         ("JS:^", "Baseline", CategoryColor::Blue, true),
         ("JS:+", "Maglev", CategoryColor::Green, true),
         ("JS:*", "Turbofan", CategoryColor::Green, true),
+        ("JS:?", "JavaScript", CategoryColor::Blue, true),
         ("Builtin:", "Builtin", CategoryColor::Brown, false),
         ("BytecodeHandler:", "Interpreter", CategoryColor::Red, false),
         ("Interpreter: ", "Interpreter", CategoryColor::Red, true),
@@ -101,6 +104,11 @@ impl JitCategoryManager {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn default_category(&mut self, profile: &mut Profile) -> CategoryHandle {
+        self.generic_jit_category.get(profile)
+    }
+
     /// Get the category and JS function name for a function from JIT code.
     ///
     /// The category is only created in the profile once a function with that
@@ -128,7 +136,8 @@ impl JitCategoryManager {
         if let Some(ion_ic_rest) = name.strip_prefix("IonIC: ") {
             let category = self.ion_ic_category.get(profile);
             if let Some((_ic_type, js_func)) = ion_ic_rest.split_once(" : ") {
-                let js_func = JsFrame::Regular(Self::intern_js_name(profile, js_func));
+                let js_func =
+                    JsFrame::RegularInAdditionToNativeFrame(Self::intern_js_name(profile, js_func));
                 return (category.into(), Some(js_func));
             }
             return (category.into(), None);
@@ -137,7 +146,8 @@ impl JitCategoryManager {
         if let Some(ion_ic_rest) = name.strip_prefix("IonIC: ") {
             let category = self.ion_ic_category.get(profile);
             if let Some((_ic_type, js_func)) = ion_ic_rest.split_once(" : ") {
-                let js_func = JsFrame::Regular(Self::intern_js_name(profile, js_func));
+                let js_func =
+                    JsFrame::RegularInAdditionToNativeFrame(Self::intern_js_name(profile, js_func));
                 return (category.into(), Some(js_func));
             }
             return (category.into(), None);
@@ -150,10 +160,9 @@ impl JitCategoryManager {
                 let category = lazy_category_handle.get(profile);
 
                 let js_name = if is_js {
-                    Some(JsFrame::Regular(Self::intern_js_name(
-                        profile,
-                        name_without_prefix,
-                    )))
+                    Some(JsFrame::RegularInAdditionToNativeFrame(
+                        Self::intern_js_name(profile, name_without_prefix),
+                    ))
                 } else {
                     None
                 };
@@ -179,7 +188,9 @@ impl JitCategoryManager {
                 if let Some((v8_wasm_name, func_index)) = v8_wasm_name_with_index.rsplit_once('-') {
                     let new_name = format!("{v8_wasm_name} (WASM:{func_index})");
                     let category = category.get(profile);
-                    let js_func = JsFrame::Regular(Self::intern_js_name(profile, &new_name));
+                    let js_func = JsFrame::RegularInAdditionToNativeFrame(Self::intern_js_name(
+                        profile, &new_name,
+                    ));
                     return (category.into(), Some(js_func));
                 }
             }
@@ -263,7 +274,7 @@ mod test {
             &mut profile,
         );
         match js_name {
-            Some(JsFrame::Regular(JsName::NonSelfHosted(s))) => {
+            Some(JsFrame::RegularInAdditionToNativeFrame(JsName::NonSelfHosted(s))) => {
                 assert_eq!(profile.get_string(s), "AccessibleButton (main.js:3560:25)")
             }
             _ => panic!(),

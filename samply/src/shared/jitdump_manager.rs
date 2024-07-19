@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fxprof_processed_profile::{
-    CategoryHandle, LibraryHandle, MarkerTiming, Profile, Symbol, SymbolTable, ThreadHandle,
+    LibraryHandle, MarkerTiming, Profile, Symbol, SymbolTable, ThreadHandle,
 };
 use linux_perf_data::jitdump::{JitDumpReader, JitDumpRecord, JitDumpRecordType};
 
@@ -17,7 +17,7 @@ use super::utils::open_file_with_fallback;
 
 #[derive(Debug)]
 pub struct JitDumpManager {
-    pending_jitdump_paths: Vec<(ThreadHandle, PathBuf, Option<PathBuf>)>,
+    pending_jitdump_paths: Vec<(ThreadHandle, PathBuf, Vec<PathBuf>)>,
     processors: Vec<SingleJitDumpProcessor>,
     unlink_after_open: bool,
 }
@@ -35,10 +35,10 @@ impl JitDumpManager {
         &mut self,
         thread: ThreadHandle,
         path: impl Into<PathBuf>,
-        fallback_dir: Option<PathBuf>,
+        lookup_dirs: Vec<PathBuf>,
     ) {
         self.pending_jitdump_paths
-            .push((thread, path.into(), fallback_dir));
+            .push((thread, path.into(), lookup_dirs));
     }
 
     pub fn process_pending_records(
@@ -49,13 +49,13 @@ impl JitDumpManager {
         timestamp_converter: &TimestampConverter,
     ) {
         self.pending_jitdump_paths
-            .retain_mut(|(thread, path, fallback_dir)| {
+            .retain_mut(|(thread, path, lookup_dirs)| {
                 fn jitdump_reader_for_path(
                     path: &Path,
-                    fallback_dir: Option<&Path>,
+                    lookup_dirs: &[PathBuf],
                     unlink_after_open: bool,
                 ) -> Option<(JitDumpReader<std::fs::File>, PathBuf)> {
-                    let (file, path) = open_file_with_fallback(path, fallback_dir).ok()?;
+                    let (file, path) = open_file_with_fallback(path, lookup_dirs).ok()?;
                     let reader = JitDumpReader::new(file).ok()?;
                     if unlink_after_open {
                         std::fs::remove_file(&path).ok()?;
@@ -63,7 +63,7 @@ impl JitDumpManager {
                     Some((reader, path))
                 }
                 let Some((reader, actual_path)) =
-                    jitdump_reader_for_path(path, fallback_dir.as_deref(), self.unlink_after_open)
+                    jitdump_reader_for_path(path, lookup_dirs, self.unlink_after_open)
                 else {
                     return true;
                 };
@@ -172,37 +172,35 @@ impl SingleJitDumpProcessor {
             match raw_jitdump_record.parse() {
                 Ok(JitDumpRecord::CodeLoad(record)) => {
                     let start_avma = record.code_addr;
-                    let end_avma = start_avma + record.code_bytes.len() as u64;
+                    let code_size = record.code_bytes.len() as u32;
+                    let end_avma = start_avma + u64::from(code_size);
 
                     let relative_address_at_start = self.cumulative_address;
-                    self.cumulative_address += record.code_bytes.len() as u32;
+                    self.cumulative_address += code_size;
 
                     let symbol_name = record.function_name.as_slice();
                     let symbol_name = std::str::from_utf8(&symbol_name).unwrap_or("");
                     self.symbols.push(Symbol {
                         address: relative_address_at_start,
-                        size: Some(record.code_bytes.len() as u32),
+                        size: Some(code_size),
                         name: symbol_name.to_owned(),
                     });
 
                     let timestamp = timestamp_converter.convert_time(raw_jitdump_record.timestamp);
-                    let timing = MarkerTiming::Instant(timestamp);
+                    let symbol_name_handle = profile.intern_string(symbol_name);
                     profile.add_marker(
                         self.thread_handle,
-                        CategoryHandle::OTHER,
-                        "JitFunctionAdd",
-                        JitFunctionAddMarker(symbol_name.to_owned()),
-                        timing,
+                        MarkerTiming::Instant(timestamp),
+                        JitFunctionAddMarker(symbol_name_handle),
                     );
 
                     let (lib_handle, relative_address_at_start) =
                         if let Some(recycler) = recycler.as_deref_mut() {
                             recycler.recycle(
-                                start_avma,
-                                end_avma,
-                                relative_address_at_start,
                                 symbol_name,
+                                code_size,
                                 self.lib_handle,
+                                relative_address_at_start,
                             )
                         } else {
                             (self.lib_handle, relative_address_at_start)
