@@ -1,5 +1,5 @@
 use std::convert::TryInto;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use debugid::DebugId;
@@ -18,15 +18,57 @@ use crate::windows::coreclr::{self, handle_new_coreclr_event};
 use crate::windows::etw_coreclr::CoreClrEtwConverter;
 use crate::windows::profile_context::KnownCategory;
 
-pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) {
-    let is_arm64 = context.is_arm64();
-
+pub fn process_etl_files(
+    context: &mut ProfileContext,
+    etl_file: &Path,
+    extra_etl_filenames: &[PathBuf],
+) {
     let mut schema_locator = SchemaLocator::new();
     add_custom_schemas(&mut schema_locator);
 
     let processing_start_timestamp = Instant::now();
 
+    let mut core_clr_context = CoreClrContext::new(context.creation_props());
+
+    let result = process_trace(
+        etl_file,
+        context,
+        &mut schema_locator,
+        &mut core_clr_context,
+    );
+    if result.is_err() {
+        dbg!(&result);
+        std::process::exit(1);
+    }
+
+    for extra_etl_file in extra_etl_filenames {
+        let result = process_trace(
+            extra_etl_file,
+            context,
+            &mut schema_locator,
+            &mut core_clr_context,
+        );
+        if result.is_err() {
+            dbg!(&result);
+            std::process::exit(1);
+        }
+    }
+
+    log::info!(
+        "Took {} seconds",
+        (Instant::now() - processing_start_timestamp).as_secs_f32()
+    );
+}
+
+fn process_trace(
+    etl_file: &Path,
+    context: &mut ProfileContext,
+    schema_locator: &mut SchemaLocator,
+    core_clr_context: &mut CoreClrContext,
+) -> Result<(), std::io::Error> {
+    let is_arm64 = context.is_arm64();
     let demand_zero_faults = false; //pargs.contains("--demand-zero-faults");
+    let mut pending_image_info: Option<((u32, u64), PeInfo)> = None;
 
     let coreclr_props = context.creation_props().coreclr;
     let mut core_clr_context = CoreClrContext::new(
@@ -41,7 +83,7 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
     );
     let mut core_clr_converter = CoreClrEtwConverter::new();
 
-    let result = open_trace(etl_file, |e| {
+    open_trace(etl_file, |e| {
         let Ok(s) = schema_locator.event_schema(e) else {
             return;
         };
@@ -107,13 +149,13 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 let pid: u32 = parser.parse("ProcessId");
                 let parent_pid: u32 = parser.parse("ParentId");
                 let image_file_name: String = parser.parse("ImageFileName");
-                let command_line: String = parser.parse("CommandLine");
+                let cmdline: String = parser.parse("CommandLine");
                 context.handle_process_dcstart(
                     timestamp_raw,
                     pid,
                     parent_pid,
                     image_file_name,
-                    Some(command_line),
+                    cmdline,
                 );
             }
             "MSNT_SystemTrace/Process/Start" => {
@@ -123,13 +165,13 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 let pid: u32 = parser.parse("ProcessId");
                 let parent_pid: u32 = parser.parse("ParentId");
                 let image_file_name: String = parser.parse("ImageFileName");
-                let command_line: String = parser.parse("CommandLine");
+                let cmdline: String = parser.parse("CommandLine");
                 context.handle_process_start(
                     timestamp_raw,
                     pid,
                     parent_pid,
                     image_file_name,
-                    Some(command_line),
+                    cmdline,
                 );
             }
             "MSNT_SystemTrace/Process/End" => {
@@ -212,43 +254,67 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                     text,
                 );
             }
+            // KernelTraceControl/ImageID/ and KernelTraceControl/ImageID/DbgID_RSDS are synthesized by xperf during
+            // `xperf -stop -d` from MSNT_SystemTrace/Image/DCStart and MSNT_SystemTrace/Image/Load; they are inserted
+            // right before the original events.
+            //
+            // These KernelTraceControl events are not available in unmerged ETL files.
+            //
+            // We can get the following information out of them:
+            //  - KernelTraceControl/ImageID/ has the image_timestamp (needed for the CodeId)
+            //  - KernelTraceControl/ImageID/DbgID_RSDS has the guid+age and the PDB path (needed for DebugId + debug_path).
             "KernelTraceControl/ImageID/" => {
-                // KernelTraceControl/ImageID/ and KernelTraceControl/ImageID/DbgID_RSDS are synthesized during merge from
-                // from MSNT_SystemTrace/Image/Load but don't contain the full path of the binary, or the full debug info in one go.
-                // We go through "ImageID/" to capture pid/address + the original filename, then expect to see a "DbgID_RSDS" event
-                // with pdb and debug info. We link those up through the "libs" hash, and then finally add them to the process
-                // in Image/Load.
-
                 let pid = s.process_id(); // there isn't a ProcessId field here
                 let image_base: u64 = parser.try_parse("ImageBase").unwrap();
                 let image_timestamp: u32 = parser.try_parse("TimeDateStamp").unwrap();
+                let image_checksum: u32 = parser.try_parse("ImageChecksum").unwrap();
                 let image_size: u32 = parser.try_parse("ImageSize").unwrap();
-                let image_path: String = parser.try_parse("OriginalFileName").unwrap();
-                context.handle_image_id(pid, image_base, image_timestamp, image_size, image_path);
+                let mut info = PeInfo::new_with_size_and_checksum(image_size, image_checksum);
+                info.image_timestamp = Some(image_timestamp);
+                pending_image_info = Some(((pid, image_base), info));
             }
             "KernelTraceControl/ImageID/DbgID_RSDS" => {
-                let pid = parser.try_parse("ProcessId").unwrap();
-                let image_base: u64 = parser.try_parse("ImageBase").unwrap();
-                let guid: GUID = parser.try_parse("GuidSig").unwrap();
-                let age: u32 = parser.try_parse("Age").unwrap();
-                let debug_id = DebugId::from_parts(
-                    Uuid::from_fields(guid.data1, guid.data2, guid.data3, &guid.data4),
-                    age,
-                );
-                let pdb_path: String = parser.try_parse("PdbFileName").unwrap();
-                context.handle_image_debug_id(pid, image_base, debug_id, pdb_path);
+                if let Some((pid_and_base, info)) = pending_image_info.as_mut() {
+                    let pid = parser.try_parse("ProcessId").unwrap();
+                    let image_base: u64 = parser.try_parse("ImageBase").unwrap();
+                    if pid_and_base == &(pid, image_base) {
+                        let guid: GUID = parser.try_parse("GuidSig").unwrap();
+                        let age: u32 = parser.try_parse("Age").unwrap();
+                        let pdb_path: String = parser.try_parse("PdbFileName").unwrap();
+                        let debug_id = DebugId::from_parts(
+                            Uuid::from_fields(guid.data1, guid.data2, guid.data3, &guid.data4),
+                            age,
+                        );
+                        info.debug_id = Some(debug_id);
+                        info.pdb_path = Some(pdb_path);
+                    }
+                };
             }
+            // These events are generated by the kernel logger.
+            // They are available in unmerged ETL files.
             "MSNT_SystemTrace/Image/Load" | "MSNT_SystemTrace/Image/DCStart" => {
-                // KernelTraceControl/ImageID/ and KernelTraceControl/ImageID/DbgID_RSDS are synthesized from MSNT_SystemTrace/Image/Load
-                // but don't contain the full path of the binary. We go through a bit of a dance to store the information from those events
-                // in pending_libraries and deal with it here. We assume that the KernelTraceControl events come before the Image/Load event.
-
                 // the ProcessId field doesn't necessarily match s.process_id();
                 let pid = parser.try_parse("ProcessId").unwrap();
                 let image_base: u64 = parser.try_parse("ImageBase").unwrap();
                 let image_size: u64 = parser.try_parse("ImageSize").unwrap();
+                let image_timestamp_maybe_zero: u32 = parser.try_parse("TimeDateStamp").unwrap(); // zero for MSNT_SystemTrace/Image/DCStart
+                let image_checksum: u32 = parser.try_parse("ImageChecksum").unwrap();
                 let path: String = parser.try_parse("FileName").unwrap();
-                context.handle_image_load(timestamp_raw, pid, image_base, image_size, path);
+
+                // Supplement the information from this event with the information from
+                // KernelTraceControl/ImageID events, if available. Those events come right
+                // before this one (they were inserted by xperf during merging, if this is
+                // a merged file).
+                let mut info = match pending_image_info.take() {
+                    Some((pid_and_base, info)) if pid_and_base == (pid, image_base) => info,
+                    _ => PeInfo::new_with_size_and_checksum(image_size as u32, image_checksum),
+                };
+
+                if info.image_timestamp.is_none() && image_timestamp_maybe_zero != 0 {
+                    info.image_timestamp = Some(image_timestamp_maybe_zero);
+                }
+
+                context.handle_image_load(timestamp_raw, pid, image_base, path, info);
             }
             "MSNT_SystemTrace/Image/UnLoad" => {
                 // nothing, but we don't want a marker for it
@@ -274,35 +340,49 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 // these events can give us the unblocking stack
                 let _thread_id: u32 = parser.parse("TThreadId");
             }
-            "V8.js/MethodLoad/Start"
-            | "Microsoft-JScript/MethodRuntime/MethodDCStart"
-            | "Microsoft-JScript/MethodRuntime/MethodLoad" => {
+            "V8.js/SourceLoad/Start"
+            | "Microsoft-JScript/ScriptContextRuntime/SourceLoad"
+            | "Microsoft-JScript/ScriptContextRundown/SourceDCStart" => {
                 let pid = s.process_id();
+                if !context.has_process_at_time(pid, timestamp_raw) {
+                    return;
+                }
+                let source_id: u64 = parser.parse("SourceID");
+                let url: String = parser.parse("Url");
+                context.handle_js_source_load(timestamp_raw, pid, source_id, url);
+            }
+            "V8.js/MethodLoad/Start"
+            | "Microsoft-JScript/MethodRuntime/MethodLoad"
+            | "Microsoft-JScript/MethodRundown/MethodDCStart" => {
+                let pid = s.process_id();
+                if !context.has_process_at_time(pid, timestamp_raw) {
+                    return;
+                }
                 let method_name: String = parser.parse("MethodName");
                 let method_start_address: Address = parser.parse("MethodStartAddress");
                 let method_size: u64 = parser.parse("MethodSize");
-                // let source_id: u64 = parser.parse("SourceID");
+                let source_id: u64 = parser.parse("SourceID");
+                let line: u32 = parser.parse("Line");
+                let column: u32 = parser.parse("Column");
                 context.handle_js_method_load(
                     timestamp_raw,
                     pid,
                     method_name,
                     method_start_address.as_u64(),
-                    method_size,
+                    method_size as u32,
+                    source_id,
+                    line,
+                    column,
                 );
             }
-            /*"V8.js/SourceLoad/" |
-            "Microsoft-JScript/MethodRuntime/MethodDCStart" |
-            "Microsoft-JScript/MethodRuntime/MethodLoad" => {
-                let source_id: u64 = parser.parse("SourceID");
-                let url: String = parser.parse("Url");
-                jscript_sources.insert(source_id, url);
-                //dbg!(s.process_id(), jscript_symbols.keys());
-            }*/
             "Microsoft-Windows-Direct3D11/ID3D11VideoContext_SubmitDecoderBuffers/win:Start" => {
                 if !context.is_in_time_range(timestamp_raw) {
                     return;
                 }
                 let tid = s.thread_id();
+                if !context.has_thread_at_time(tid, timestamp_raw) {
+                    return;
+                }
                 let text = event_properties_to_string(&s, &mut parser, None);
                 context.handle_freeform_marker_start(
                     timestamp_raw,
@@ -316,11 +396,14 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                     return;
                 }
                 let tid = s.thread_id();
+                if !context.has_thread_at_time(tid, timestamp_raw) {
+                    return;
+                }
                 let text = event_properties_to_string(&s, &mut parser, None);
                 context.handle_freeform_marker_end(
                     timestamp_raw,
                     tid,
-                    s.name().strip_suffix("/win:Start").unwrap(),
+                    s.name().strip_suffix("/win:Stop").unwrap(),
                     text,
                     KnownCategory::D3DVideoSubmitDecoderBuffers,
                 );
@@ -329,13 +412,16 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 if !context.is_in_time_range(timestamp_raw) {
                     return;
                 }
+                let tid = e.EventHeader.ThreadId;
+                if !context.has_thread_at_time(tid, timestamp_raw) {
+                    return;
+                }
                 let Some(marker_name) = marker_name
                     .strip_prefix("Mozilla.FirefoxTraceLogger/")
                     .and_then(|s| s.strip_suffix("/Info"))
                 else {
                     return;
                 };
-                let tid = e.EventHeader.ThreadId;
                 // We ignore e.EventHeader.TimeStamp and instead take the timestamp from the fields.
                 let start_time_qpc: u64 = parser.try_parse("StartTime").unwrap();
                 let end_time_qpc: u64 = parser.try_parse("EndTime").unwrap();
@@ -358,6 +444,7 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 context.handle_firefox_marker(
                     tid,
                     marker_name,
+                    timestamp_raw,
                     start_time_qpc,
                     end_time_qpc,
                     phase,
@@ -373,15 +460,33 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 if !context.is_in_time_range(timestamp_raw) {
                     return;
                 }
+                let tid = e.EventHeader.ThreadId;
+                if !context.has_thread_at_time(tid, timestamp_raw) {
+                    return;
+                }
                 let Some(marker_name) = marker_name
                     .strip_prefix("Google.Chrome/")
                     .and_then(|s| s.strip_suffix("/Info"))
                 else {
                     return;
                 };
-                let tid = e.EventHeader.ThreadId;
+
                 // We ignore e.EventHeader.TimeStamp and instead take the timestamp from the fields.
-                let timestamp_raw: u64 = parser.try_parse("Timestamp").unwrap();
+                // The timestamp can be u64 or i64, depending on which code emits the events.
+                // Chrome's marker timestamps are in microseconds relative to the QPC origin.
+                // They are not in QPC ticks!
+                // u64: https://source.chromium.org/chromium/chromium/src/+/main:base/trace_event/etw_interceptor_win.cc;l=65-85;drc=47d1537de78d69eb441b4cad8c441f0291faca9a
+                // i64: https://source.chromium.org/chromium/chromium/src/+/main:base/trace_event/trace_event_etw_export_win.cc;l=316-334;drc=8c29f4a8930c3ccccdf1b66c28fe484cee7c7362
+                let timestamp_us_i64: Option<i64> = parser.try_parse("Timestamp").ok();
+                let timestamp_us_u64: Option<u64> = parser.try_parse("Timestamp").ok();
+                let timestamp_us: Option<u64> =
+                    timestamp_us_u64.or_else(|| timestamp_us_i64.and_then(|t| t.try_into().ok()));
+                let Some(timestamp_us) = timestamp_us else {
+                    // Saw "SequenceManagerImpl::MoveReadyDelayedTasksToWorkQueues" with no timestamp at all
+                    // on 2024-05-23, possibly from VS Code electron
+                    log::warn!("No Timestamp field on Chrome {marker_name} event");
+                    return;
+                };
                 let phase: String = parser.try_parse("Phase").unwrap();
                 let keyword_bitfield = e.EventHeader.EventDescriptor.Keyword; // a bitfield of keywords
                 let text = event_properties_to_string(
@@ -391,17 +496,21 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                 );
                 context.handle_chrome_marker(
                     tid,
-                    marker_name,
                     timestamp_raw,
+                    marker_name,
+                    timestamp_us,
                     &phase,
                     keyword_bitfield,
                     text,
                 );
             }
             dotnet_event if dotnet_event.starts_with("Microsoft-Windows-DotNETRuntime") => {
-                let is_in_time_range = context.is_in_time_range(timestamp_raw);
                 // Note: No "/" at end of event name, because we want DotNETRuntimeRundown as well
-                //coreclr::handle_coreclr_event(context, &mut core_clr_context, &s, &mut parser, is_in_time_range);
+                let pid = s.process_id();
+                if !context.has_process_at_time(pid, timestamp_raw) {
+                    return;
+                }
+                let is_in_range = context.is_in_time_range(timestamp_raw);
                 if let Some(event) = core_clr_converter.etw_event_to_coreclr_event(
                     &mut core_clr_context,
                     &s,
@@ -411,7 +520,7 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                         context,
                         &mut core_clr_context,
                         &event,
-                        is_in_time_range,
+                        is_in_range,
                     );
                 }
             }
@@ -420,22 +529,14 @@ pub fn profile_pid_from_etl_file(context: &mut ProfileContext, etl_file: &Path) 
                     return;
                 }
                 let tid = e.EventHeader.ThreadId;
-                if context.has_thread(tid) {
-                    let task_and_op = s.name().split_once('/').unwrap().1;
-                    let text = event_properties_to_string(&s, &mut parser, None);
-                    context.handle_unknown_event(timestamp_raw, tid, task_and_op, text);
+                if !context.has_thread_at_time(tid, timestamp_raw) {
+                    return;
                 }
+
+                let task_and_op = s.name().split_once('/').unwrap().1;
+                let text = event_properties_to_string(&s, &mut parser, None);
+                context.handle_unknown_event(timestamp_raw, tid, task_and_op, text);
             }
         }
-    });
-
-    if result.is_err() {
-        dbg!(&result);
-        std::process::exit(1);
-    }
-
-    log::info!(
-        "Took {} seconds",
-        (Instant::now() - processing_start_timestamp).as_secs_f32()
-    );
+    })
 }

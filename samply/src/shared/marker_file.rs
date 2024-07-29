@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Lines};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fxprof_processed_profile::Timestamp;
 
@@ -62,6 +62,7 @@ pub struct MarkerFileInfo {
     pub prefix: String,
     #[allow(dead_code)]
     pub pid: u32,
+    #[allow(dead_code)]
     pub tid: Option<u32>,
 }
 
@@ -79,10 +80,10 @@ pub fn parse_marker_file_path(path: &Path) -> MarkerFileInfo {
 
 pub fn get_markers(
     marker_file: &Path,
-    extra_dir: Option<&Path>,
+    lookup_dirs: &[PathBuf],
     timestamp_converter: TimestampConverter,
 ) -> Result<Vec<MarkerSpan>, std::io::Error> {
-    let (f, _true_path) = open_file_with_fallback(marker_file, extra_dir)?;
+    let (f, _true_path) = open_file_with_fallback(marker_file, lookup_dirs)?;
     let marker_file = MarkerFile::parse(f, timestamp_converter);
     let mut marker_spans: Vec<MarkerSpan> = marker_file.collect();
     marker_spans.sort_by_key(|m| m.start_time);

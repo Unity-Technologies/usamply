@@ -22,14 +22,15 @@ use mach::task::task_threads;
 use mach::traps::mach_task_self;
 use mach::vm::mach_vm_deallocate;
 use mach::vm_types::{mach_vm_address_t, mach_vm_size_t};
-use object::{CompressedFileRange, CompressionFormat, Object, ObjectSection};
+use object::{CompressionFormat, Object, ObjectSection};
 use samply_symbols::{object, DebugIdExt};
 use wholesym::samply_symbols;
 
 use super::error::SamplingError;
 use super::kernel_error::{IntoResult, KernelError};
 use super::proc_maps::{
-    DyldInfo, DyldInfoManager, Modification, ModuleSvmaInfo, StackwalkerRef, VmSubData,
+    proc_cmdline, DyldInfo, DyldInfoManager, Modification, ModuleSvmaInfo, StackwalkerRef,
+    VmSubData,
 };
 use super::sampler::{ProcessSpecificPath, TaskInit};
 use super::thread_profiler::{get_thread_id, get_thread_name, ThreadProfiler};
@@ -43,6 +44,7 @@ use crate::shared::lib_mappings::{
 use crate::shared::marker_file;
 use crate::shared::marker_file::get_markers;
 use crate::shared::perf_map::try_load_perf_map;
+use crate::shared::process_name::make_process_name;
 use crate::shared::process_sample_data::{MarkerSpanOnThread, ProcessSampleData};
 use crate::shared::recording_props::ProfileCreationProps;
 use crate::shared::recycling::{ProcessRecycler, ProcessRecyclingData, ThreadRecycler};
@@ -140,15 +142,28 @@ impl TaskProfiler {
         let initial_lib_mods = lib_info_manager
             .check_for_changes()
             .map_err(|e| SamplingError::Ignorable("Could not check process libraries", e))?;
-        let executable_name = initial_lib_mods
-            .iter()
-            .find_map(|change| match change {
-                Modification::Added(lib) if lib.is_executable => Path::new(&lib.file)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string()),
-                _ => None,
-            })
-            .unwrap_or_else(|| command_name.to_string());
+
+        let cmdline: Vec<String> = proc_cmdline(pid as i32).unwrap_or_default();
+        let executable_name =
+            if let Some(cmd) = cmdline.first().and_then(|cmd| Path::new(cmd).file_name()) {
+                cmd.to_string_lossy().to_string()
+            } else {
+                initial_lib_mods
+                    .iter()
+                    .find_map(|change| match change {
+                        Modification::Added(lib) if lib.is_executable => Path::new(&lib.file)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| command_name.to_string())
+            };
+
+        let name = make_process_name(
+            &executable_name,
+            cmdline,
+            profile_creation_props.arg_count_to_include_in_process_name,
+        );
 
         let thread_acts = get_thread_list(task, profile_creation_props.main_thread_only)?;
         if thread_acts.is_empty() {
@@ -160,7 +175,7 @@ impl TaskProfiler {
 
         let recycling_data = process_recycler
             .as_mut()
-            .and_then(|r| r.recycle_by_name(&executable_name));
+            .and_then(|r| r.recycle_by_name(&name));
 
         let mut live_threads = HashMap::new();
         let mut thread_act_iter = thread_acts.into_iter();
@@ -195,7 +210,7 @@ impl TaskProfiler {
                 )
             }
             None => {
-                let profile_process = profile.add_process(&executable_name, pid, start_time);
+                let profile_process = profile.add_process(&name, pid, start_time);
                 let main_thread_handle =
                     profile.add_thread(profile_process, main_thread_tid, start_time, true);
                 if let Some(main_thread_name) = &main_thread_name {
@@ -581,7 +596,7 @@ impl TaskProfiler {
                     self.jitdump_manager.add_jitdump_path(
                         self.main_thread_handle,
                         jitdump_path,
-                        None,
+                        Vec::new(),
                     );
                 }
                 ProcessSpecificPath::MarkerFilePath(marker_file_path) => {
@@ -670,7 +685,7 @@ impl TaskProfiler {
         let mut marker_spans = Vec::new();
         for (thread_handle, marker_file_path) in self.marker_file_paths {
             if let Ok(marker_spans_from_this_file) =
-                get_markers(&marker_file_path, None, self.timestamp_converter)
+                get_markers(&marker_file_path, &[], self.timestamp_converter)
             {
                 marker_spans.extend(marker_spans_from_this_file.into_iter().map(|span| {
                     MarkerSpanOnThread {
@@ -693,10 +708,9 @@ impl TaskProfiler {
             marker_spans,
         );
 
-        let recycling_data = if let (Some(mut jit_function_recycler), Some(thread_recycler)) =
+        let recycling_data = if let (Some(jit_function_recycler), Some(thread_recycler)) =
             (self.jit_function_recycler, self.thread_recycler)
         {
-            jit_function_recycler.finish_round();
             Some((
                 self.executable_name,
                 ProcessRecyclingData {
@@ -722,28 +736,8 @@ fn get_debug_frame(file_path: &str) -> Option<UnwindSectionBytes> {
     let mmap = unsafe { memmap2::MmapOptions::new().map(&file).ok()? };
     let data = &mmap[..];
     let obj = object::read::File::parse(data).ok()?;
-    let compressed_range = if let Some(zdebug_frame_section) = obj.section_by_name("__zdebug_frame")
-    {
-        // Go binaries use compressed sections of the __zdebug_* type even on macOS,
-        // where doing so is quite uncommon. Object's mach-O support does not handle them.
-        // But we want to handle them.
-        let (file_range_start, file_range_size) = zdebug_frame_section.file_range()?;
-        let section_data = zdebug_frame_section.data().ok()?;
-        if !section_data.starts_with(b"ZLIB\0\0\0\0") {
-            return None;
-        }
-        let b = section_data.get(8..12)?;
-        let uncompressed_size = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
-        CompressedFileRange {
-            format: CompressionFormat::Zlib,
-            offset: file_range_start + 12,
-            compressed_size: file_range_size - 12,
-            uncompressed_size: uncompressed_size.into(),
-        }
-    } else {
-        let debug_frame_section = obj.section_by_name("__debug_frame")?;
-        debug_frame_section.compressed_file_range().ok()?
-    };
+    let debug_frame_section = obj.section_by_name("__debug_frame")?;
+    let compressed_range = debug_frame_section.compressed_file_range().ok()?;
     match compressed_range.format {
         CompressionFormat::None => Some(UnwindSectionBytes::Mmap(MmapSubData::try_new(
             mmap,

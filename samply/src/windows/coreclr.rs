@@ -1,3 +1,4 @@
+use bitflags::bitflags;
 use std::{collections::HashMap, convert::TryInto, fmt::Display};
 
 use eventpipe::coreclr::{GcSuspendEeReason, GcType};
@@ -22,27 +23,27 @@ pub struct CoreClrContext {
     pub props: CoreClrProviderProps,
     pub unknown_event_markers: bool,
 
-    last_marker_on_thread: HashMap<u32, MarkerHandle>,
+    last_marker_on_thread: HashMap<u32, (ThreadHandle, MarkerHandle)>,
     gc_markers_on_thread: HashMap<u32, HashMap<&'static str, SavedMarkerInfo>>,
 }
 
 impl CoreClrContext {
-    pub fn new(props: CoreClrProviderProps, unknown_event_markers: bool) -> Self {
+    pub fn new(context: &ProfileContext) -> Self {
         Self {
-            props,
-            unknown_event_markers,
+            props: context.creation_props().coreclr.to_provider_props(),
+            unknown_event_markers: context.creation_props().unknown_event_markers,
 
             last_marker_on_thread: HashMap::new(),
             gc_markers_on_thread: HashMap::new(),
         }
     }
 
-    fn remove_last_event_for_thread(&mut self, tid: u32) -> Option<MarkerHandle> {
+    fn remove_last_event_for_thread(&mut self, tid: u32) -> Option<(ThreadHandle, MarkerHandle)> {
         self.last_marker_on_thread.remove(&tid)
     }
 
-    fn set_last_event_for_thread(&mut self, tid: u32, marker: MarkerHandle) {
-        self.last_marker_on_thread.insert(tid, marker);
+    fn set_last_event_for_thread(&mut self, tid: u32, thread_marker: (ThreadHandle, MarkerHandle)) {
+        self.last_marker_on_thread.insert(tid, thread_marker);
     }
 
     fn save_gc_marker(
@@ -67,6 +68,40 @@ impl CoreClrContext {
         self.gc_markers_on_thread
             .get_mut(&tid)
             .and_then(|m| m.remove(event))
+    }
+}
+
+bitflags! {
+    #[derive(PartialEq, Eq)]
+    pub struct CoreClrMethodFlagsMap: u32 {
+        const dynamic = 0x1;
+        const generic = 0x2;
+        const has_shared_generic_code = 0x4;
+        const jitted = 0x8;
+        const jit_helper = 0x10;
+        const profiler_rejected_precompiled_code = 0x20;
+        const ready_to_run_rejected_precompiled_code = 0x40;
+
+        // next three bits are the tiered compilation level
+        const opttier_bit0 = 0x80;
+        const opttier_bit1 = 0x100;
+        const opttier_bit2 = 0x200;
+
+        // extent flags/value (hot/cold)
+        const extent_bit_0 = 0x10000000; // 0x1 == cold, 0x0 = hot
+        const extent_bit_1 = 0x20000000; // always 0 for now looks like
+        const extent_bit_2 = 0x40000000;
+        const extent_bit_3 = 0x80000000;
+
+        const _ = !0;
+    }
+    #[derive(PartialEq, Eq)]
+    pub struct TieredCompilationSettingsMap: u32 {
+        const None = 0x0;
+        const QuickJit = 0x1;
+        const QuickJitForLoops = 0x2;
+        const TieredPGO = 0x4;
+        const ReadyToRun = 0x8;
     }
 }
 
@@ -113,7 +148,10 @@ pub fn handle_coreclr_event(
         coreclr_context.props.event_stacks,
     );
 
-    if !context.is_interesting_process(s.process_id(), None, None) {
+    let pid = s.process_id();
+    let tid = s.thread_id();
+
+    if !context.is_interesting_process(pid, None, None) {
         return;
     }
 
@@ -130,9 +168,6 @@ pub fn handle_coreclr_event(
             panic!("Unexpected event {}", s.name())
         }
     }
-
-    let pid = s.process_id();
-    let tid = s.thread_id();
 
     // TODO -- we may need to use the rundown provider if we trace running processes
     // https://learn.microsoft.com/en-us/dotnet/framework/performance/clr-etw-providers
@@ -262,13 +297,15 @@ pub fn handle_coreclr_event(
                 .chain(parser.buffer.chunks_exact(8))
                 .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()));
 
-            context.handle_coreclr_stack(timestamp_raw, pid, tid, address_iter, marker);
+            context.handle_coreclr_stack(timestamp_raw, tid, address_iter, marker);
             handled = true;
         }
         ("GarbageCollection", gc_event) => {
-            if !is_in_time_range {
+            // if we're not in the range, or if the thread isn't recorded (because --main-thread-only)
+            if !is_in_time_range || !context.has_thread_at_time(tid, timestamp_raw) {
                 return;
             }
+
             match gc_event {
                 "GCSampledObjectAllocation" => {
                     if !gc_allocs {
@@ -277,17 +314,19 @@ pub fn handle_coreclr_event(
 
                     // If High/Low flags are set, then we get one of these for every alloc. Otherwise only
                     // when a threshold is hit. (100kb) The count and size are aggregates in that case.
+                    // TODO: track whether we're sampling with HIGH/LOW set; if we are, then use GcAllocMarker.
+                    // Otherwise, use GcAllocTickMarker
                     let type_id: u64 = parser.parse("TypeID"); // TODO: convert to str, with bulk type data
                                                                //let address: u64 = parser.parse("Address");
                     let _object_count: u32 = parser.parse("ObjectCountForTypeSample");
                     let total_size: u64 = parser.parse("TotalSizeForTypeSample");
 
+                    let category = context.known_category(KnownCategory::CoreClrGc);
+                    let clr_type = context.intern_profile_string(&format!("0x{:x}", type_id));
                     let mh = context.add_thread_instant_marker(
                         timestamp_raw,
                         tid,
-                        KnownCategory::CoreClrGc,
-                        "GC Alloc",
-                        CoreClrGcAllocMarker(format!("0x{:x}", type_id), total_size as usize),
+                        CoreClrGcAllocMarker(clr_type, total_size as usize, category),
                     );
                     coreclr_context.set_last_event_for_thread(tid, mh);
                     handled = true;
@@ -303,15 +342,16 @@ pub fn handle_coreclr_event(
                         None
                     });
 
+                    let category = context.known_category(KnownCategory::CoreClrGc);
+                    let name = context.intern_profile_string("GC Trigger");
+                    let description = context.intern_profile_string(&format!(
+                        "GC Trigger: {}",
+                        DisplayUnknownIfNone(&reason)
+                    ));
                     let mh = context.add_thread_instant_marker(
                         timestamp_raw,
                         tid,
-                        KnownCategory::CoreClrGc,
-                        "GC Trigger",
-                        CoreClrGcEventMarker(format!(
-                            "GC Trigger: {}",
-                            DisplayUnknownIfNone(&reason)
-                        )),
+                        CoreClrGcEventMarker(name, description, category),
                     );
                     coreclr_context.set_last_event_for_thread(tid, mh);
                     handled = true;
@@ -349,13 +389,14 @@ pub fn handle_coreclr_event(
                     }
 
                     if let Some(info) = coreclr_context.remove_gc_marker(tid, "GCSuspendEE") {
+                        let category = context.known_category(KnownCategory::CoreClrGc);
+                        let name = context.intern_profile_string(&info.name);
+                        let description = context.intern_profile_string(&info.description);
                         context.add_thread_interval_marker(
                             info.start_timestamp_raw,
                             timestamp_raw,
                             tid,
-                            KnownCategory::CoreClrGc,
-                            &info.name,
-                            CoreClrGcEventMarker(info.description),
+                            CoreClrGcEventMarker(name, description, category),
                         );
                     }
                     handled = true;
@@ -404,13 +445,14 @@ pub fn handle_coreclr_event(
                     //let count: u32 = parser.parse("Count");
                     //let depth: u32 = parser.parse("Depth");
                     if let Some(info) = coreclr_context.remove_gc_marker(tid, "GC") {
+                        let category = context.known_category(KnownCategory::CoreClrGc);
+                        let name = context.intern_profile_string(&info.name);
+                        let description = context.intern_profile_string(&info.description);
                         context.add_thread_interval_marker(
                             info.start_timestamp_raw,
                             timestamp_raw,
                             tid,
-                            KnownCategory::CoreClrGc,
-                            &info.name,
-                            CoreClrGcEventMarker(info.description),
+                            CoreClrGcEventMarker(name, description, category),
                         );
                     }
                     handled = true;
@@ -446,13 +488,15 @@ pub fn handle_coreclr_event(
     }
 
     if !handled && coreclr_context.unknown_event_markers {
+        let name = s.name().split_once('/').unwrap().1;
         let text = event_properties_to_string(s, parser, None);
+
+        let str_handle = context.intern_profile_string(format!("{}: {}", name, text).as_str());
+
         let marker_handle = context.add_thread_instant_marker(
             timestamp_raw,
             tid,
-            KnownCategory::Unknown,
-            s.name().split_once('/').unwrap().1,
-            SimpleMarker(text),
+            SimpleMarker(str_handle)
         );
 
         coreclr_context.set_last_event_for_thread(tid, marker_handle);
@@ -488,36 +532,31 @@ pub fn handle_new_coreclr_event(
             // don't care
         }
         CoreClrEvent::GcTriggered(e) if is_in_time_range && gc_markers => {
+            let category = context.known_category(KnownCategory::CoreClrGc);
             let mh = context.add_thread_instant_marker(
                 e.common.timestamp,
                 e.common.thread_id,
-                KnownCategory::CoreClrGc,
-                "GC Trigger",
-                CoreClrGcEventMarker(format!("GC Trigger: {}", e.reason)),
-            );
+                CoreClrGcMarker(category));
             coreclr_context.set_last_event_for_thread(e.common.thread_id, mh);
         }
         CoreClrEvent::GcAllocationTick(e) if is_in_time_range && gc_allocs => {}
         CoreClrEvent::GcSampledObjectAllocation(e) if is_in_time_range && gc_allocs => {
+            let type_name_str = context.intern_profile_string(&format!("{}", DisplayUnknownIfNone(&e.type_name)));
+            let category = context.known_category(KnownCategory::CoreClrGc);
             let mh = context.add_thread_instant_marker(
                 e.common.timestamp,
                 e.common.thread_id,
-                KnownCategory::CoreClrGc,
-                "GC Alloc",
-                CoreClrGcAllocMarker(
-                    format!("{}", DisplayUnknownIfNone(&e.type_name)),
-                    e.total_size as usize,
-                ),
-            );
+                CoreClrGcAllocMarker(type_name_str, e.total_size as usize, category));
             coreclr_context.set_last_event_for_thread(e.common.thread_id, mh);
         }
         CoreClrEvent::GcStart(e) if is_in_time_range && gc_markers => {
+            // TODO: save this as a CoreClrGcDetailedMarker, instead of putting
+            // the types, reason, GC# and generation into a string
+            /*
             // TODO: use gc_type_str as the name
             coreclr_context.save_gc_marker(
                 e.common.thread_id,
                 e.common.timestamp,
-                "GC",
-                "GC".to_owned(),
                 format!(
                     "{}: {} (GC #{}, gen{})",
                     DisplayUnknownIfNone(&e.gc_type),
@@ -526,8 +565,10 @@ pub fn handle_new_coreclr_event(
                     DisplayUnknownIfNone(&e.depth)
                 ),
             );
+            */
         }
         CoreClrEvent::GcEnd(e) if is_in_time_range && gc_markers => {
+            /*
             if let Some(info) = coreclr_context.remove_gc_marker(e.common.thread_id, "GC") {
                 context.add_thread_interval_marker(
                     info.start_timestamp_raw,
@@ -538,6 +579,7 @@ pub fn handle_new_coreclr_event(
                     CoreClrGcEventMarker(info.description),
                 );
             }
+            */
         }
         _ => {}
     }

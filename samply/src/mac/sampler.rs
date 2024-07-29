@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use std::{mem, thread};
@@ -36,7 +36,6 @@ pub struct TaskInit {
 }
 
 pub struct Sampler {
-    command_name: String,
     task_receiver: Receiver<TaskInitOrShutdown>,
     recording_props: Arc<RecordingProps>,
     profile_creation_props: Arc<ProfileCreationProps>,
@@ -44,21 +43,11 @@ pub struct Sampler {
 
 impl Sampler {
     pub fn new(
-        command: String,
         task_receiver: Receiver<TaskInitOrShutdown>,
         recording_props: RecordingProps,
         profile_creation_props: ProfileCreationProps,
     ) -> Self {
-        let command_name = Path::new(&command)
-            .components()
-            .next_back()
-            .unwrap()
-            .as_os_str()
-            .to_string_lossy()
-            .to_string();
-
         Sampler {
-            command_name,
             task_receiver,
             recording_props: Arc::new(recording_props),
             profile_creation_props: Arc::new(profile_creation_props),
@@ -75,10 +64,13 @@ impl Sampler {
         };
 
         let mut profile = Profile::new(
-            &self.profile_creation_props.profile_name,
+            self.profile_creation_props.profile_name(),
             ReferenceTimestamp::from_system_time(reference_system_time),
             self.recording_props.interval.into(),
         );
+        if let Some(macos_name_and_version) = get_macos_name_and_version() {
+            profile.set_os_name(&macos_name_and_version);
+        }
 
         let mut jit_category_manager =
             crate::shared::jit_category_manager::JitCategoryManager::new();
@@ -106,7 +98,7 @@ impl Sampler {
         let root_task = TaskProfiler::new(
             root_task_init,
             timestamp_converter,
-            &self.command_name,
+            &self.profile_creation_props.fallback_profile_name,
             &mut profile,
             process_recycler.as_mut(),
             self.profile_creation_props.clone(),
@@ -147,7 +139,7 @@ impl Sampler {
                 if let Ok(new_task) = TaskProfiler::new(
                     task_init,
                     timestamp_converter,
-                    &self.command_name,
+                    &self.profile_creation_props.fallback_profile_name,
                     &mut profile,
                     process_recycler.as_mut(),
                     self.profile_creation_props.clone(),
@@ -241,4 +233,19 @@ impl Sampler {
 
         Ok(profile)
     }
+}
+
+fn get_macos_name_and_version() -> Option<String> {
+    #[derive(serde_derive::Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct SystemVersionDict {
+        product_name: String,
+        product_user_visible_version: String,
+    }
+
+    let SystemVersionDict {
+        product_name,
+        product_user_visible_version,
+    } = plist::from_file("/System/Library/CoreServices/SystemVersion.plist").ok()?;
+    Some(format!("{product_name} {product_user_visible_version}"))
 }

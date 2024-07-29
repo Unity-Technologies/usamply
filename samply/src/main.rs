@@ -9,14 +9,17 @@ mod windows;
 
 mod import;
 mod linux_shared;
+mod name;
 mod profile_json_preparse;
 mod server;
 mod shared;
 
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::BufReader;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -33,6 +36,8 @@ use shared::included_processes::IncludedProcesses;
 use shared::recording_props::{
     CoreClrProfileProps, ProcessLaunchProps, ProfileCreationProps, RecordingMode, RecordingProps,
 };
+use shared::save_profile::save_profile_to_file;
+use shared::symbol_props::SymbolProps;
 #[cfg(target_os = "windows")]
 use windows::profiler;
 
@@ -100,12 +105,18 @@ struct LoadArgs {
 
     #[command(flatten)]
     server_args: ServerArgs,
+
+    #[command(flatten)]
+    symbol_args: SymbolArgs,
 }
 
 #[derive(Debug, Args)]
 struct ImportArgs {
     /// Path to the profile file that should be imported.
     file: PathBuf,
+
+    /// Optional extra paths to ETL files for user sessions.
+    user_etl: Vec<PathBuf>,
 
     #[command(flatten)]
     profile_creation_args: ProfileCreationArgs,
@@ -115,11 +126,18 @@ struct ImportArgs {
     save_only: bool,
 
     /// Output filename.
-    #[arg(short, long, default_value = "profile.json")]
+    #[arg(short, long, default_value = "profile.json.gz")]
     output: PathBuf,
 
     #[command(flatten)]
     server_args: ServerArgs,
+
+    #[command(flatten)]
+    symbol_args: SymbolArgs,
+
+    /// Additional directories to use for looking up jitdump and marker files.
+    #[arg(long)]
+    aux_file_dir: Vec<PathBuf>,
 
     /// Only include processes with this name substring (can be specified multiple times).
     #[arg(long)]
@@ -137,13 +155,37 @@ struct ImportArgs {
     #[clap(long, require_equals = true, value_name = "FLAG", value_enum, value_delimiter = ',', num_args = 0.., default_values_t = vec![CoreClrArgs::Enabled])]
     coreclr: Vec<CoreClrArgs>,
 
-    /// Start time to capture samples at, in seconds
-    #[arg(long)]
-    tstart: Option<u32>,
+    /// Time range of recording to include in profile. Format is "start-stop" or "start+duration" with each part optional, e.g. "5s", "5s-", "-10s", "1s-10s" or "1s+9s".
+    #[cfg(target_os = "windows")]
+    #[arg(long, value_parser=parse_time_range)]
+    time_range: Option<(std::time::Duration, std::time::Duration)>,
+}
 
-    /// End time to capture samples at, in seconds
-    #[arg(long)]
-    tstop: Option<u32>,
+#[allow(unused)]
+fn parse_time_range(
+    arg: &str,
+) -> Result<(std::time::Duration, std::time::Duration), humantime::DurationError> {
+    let (is_duration, splitchar) = if arg.contains('+') {
+        (true, '+')
+    } else {
+        (false, '-')
+    };
+
+    let parts: Vec<&str> = arg.splitn(2, splitchar).collect();
+
+    let start = if parts[0].is_empty() {
+        std::time::Duration::ZERO
+    } else {
+        humantime::parse_duration(parts[0])?
+    };
+
+    let end = if parts.len() == 1 || parts[1].is_empty() {
+        std::time::Duration::MAX
+    } else {
+        humantime::parse_duration(parts[1])?
+    };
+
+    Ok((start, if is_duration { start + end } else { end }))
 }
 
 #[allow(unused)]
@@ -169,11 +211,14 @@ struct RecordArgs {
     save_only: bool,
 
     /// Output filename.
-    #[arg(short, long, default_value = "profile.json")]
+    #[arg(short, long, default_value = "profile.json.gz")]
     output: PathBuf,
 
     #[command(flatten)]
     server_args: ServerArgs,
+
+    #[command(flatten)]
+    symbol_args: SymbolArgs,
 
     /// Profile the execution of this command.
     #[arg(
@@ -205,7 +250,12 @@ struct RecordArgs {
     #[arg(long)]
     gfx: bool,
 
+    /// Enable browser-related event capture (JavaScript stacks and trace events)
+    #[arg(long)]
+    browsers: bool,
+
     /// Keep the ETL file after recording (Windows only).
+    #[cfg(target_os = "windows")]
     #[arg(long)]
     keep_etl: bool,
 }
@@ -238,6 +288,10 @@ struct ServerArgs {
     #[arg(short, long)]
     no_open: bool,
 
+    /// The address to use for the local web server
+    #[arg(long, default_value = "127.0.0.1")]
+    address: String,
+
     /// The port to use for the local web server
     #[arg(short = 'P', long, default_value = "3000+")]
     port: String,
@@ -245,6 +299,38 @@ struct ServerArgs {
     /// Print debugging output.
     #[arg(short, long)]
     verbose: bool,
+}
+
+/// Arguments describing where to obtain symbol files.
+#[derive(Debug, Args)]
+struct SymbolArgs {
+    /// Extra directories containing symbol files
+    #[arg(long)]
+    symbol_dir: Vec<PathBuf>,
+
+    /// Additional URLs of symbol servers serving PDB / DLL / EXE files
+    #[arg(long)]
+    windows_symbol_server: Vec<String>,
+
+    /// Overrides the default cache directory for Windows symbol files which were downloaded from a symbol server
+    #[arg(long)]
+    windows_symbol_cache: Option<PathBuf>,
+
+    /// Additional URLs of symbol servers serving Breakpad .sym files
+    #[arg(long)]
+    breakpad_symbol_server: Vec<String>,
+
+    /// Additional local directories containing Breakpad .sym files
+    #[arg(long)]
+    breakpad_symbol_dir: Vec<String>,
+
+    /// Overrides the default cache directory for Breakpad symbol files
+    #[arg(long)]
+    breakpad_symbol_cache: Option<PathBuf>,
+
+    /// Extra directory containing symbol files, with the directory structure used by simpleperf's scripts
+    #[arg(long)]
+    simpleperf_binary_cache: Option<PathBuf>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -277,6 +363,13 @@ pub struct ProfileCreationArgs {
     /// Create a separate thread for each CPU. Not supported on macOS
     #[arg(long)]
     per_cpu_threads: bool,
+
+    /// Include up to <INCLUDE_ARGS> command line arguments in the process name.
+    /// This can help differentiate processes if the same executable is used
+    /// for different types of programs. And in --reuse-threads mode it
+    /// allows more control over which processes are matched up.
+    #[arg(long, default_value = "0", num_args=0..=1, require_equals = true, default_missing_value = "100")]
+    include_args: usize,
 
     /// Emit .syms.json sidecar file containing gathered symbol info for all frames referenced by
     /// this profile. With this file along with the profile, samply can load the profile
@@ -327,7 +420,12 @@ fn main() {
                         std::process::exit(1)
                     }
                 };
-            start_server_main(profile_filename, load_args.server_props(), libinfo_map);
+            start_server_main(
+                profile_filename,
+                load_args.server_props(),
+                load_args.symbol_props(),
+                libinfo_map,
+            );
         }
 
         Action::Import(import_args) => {
@@ -338,14 +436,7 @@ fn main() {
                     std::process::exit(1)
                 }
             };
-            let profile_creation_props = import_args.profile_creation_props();
-            convert_file_to_profile(
-                &import_args.file,
-                &input_file,
-                &import_args.output,
-                profile_creation_props,
-                import_args.included_processes(),
-            );
+            convert_file_to_profile(&input_file, &import_args);
             if let Some(server_props) = import_args.server_props() {
                 let profile_filename = &import_args.output;
                 let libinfo_map = profile_json_preparse::parse_libinfo_map_from_profile_file(
@@ -353,7 +444,12 @@ fn main() {
                     profile_filename,
                 )
                 .expect("Couldn't parse libinfo map from profile file");
-                start_server_main(profile_filename, server_props, libinfo_map);
+                start_server_main(
+                    profile_filename,
+                    server_props,
+                    import_args.symbol_props(),
+                    libinfo_map,
+                );
             }
         }
 
@@ -367,12 +463,14 @@ fn main() {
             let recording_props = record_args.recording_props();
             let recording_mode = record_args.recording_mode();
             let profile_creation_props = record_args.profile_creation_props();
+            let symbol_props = record_args.symbol_props();
             let server_props = record_args.server_props();
 
             let exit_status = match profiler::start_recording(
                 recording_mode,
                 recording_props,
                 profile_creation_props,
+                symbol_props,
                 server_props,
             ) {
                 Ok(exit_status) => exit_status,
@@ -403,6 +501,10 @@ impl LoadArgs {
     fn server_props(&self) -> ServerProps {
         self.server_args.server_props()
     }
+
+    fn symbol_props(&self) -> SymbolProps {
+        self.symbol_args.symbol_props()
+    }
 }
 
 impl ImportArgs {
@@ -414,20 +516,22 @@ impl ImportArgs {
         }
     }
 
+    fn symbol_props(&self) -> SymbolProps {
+        self.symbol_args.symbol_props()
+    }
+
     fn profile_creation_props(&self) -> ProfileCreationProps {
-        let profile_name = if let Some(profile_name) = &self.profile_creation_args.profile_name {
-            profile_name.clone()
-        } else {
-            let name = self.file.file_name().unwrap_or(self.file.as_os_str());
-            name.to_string_lossy().into()
-        };
+        let filename = self.file.file_name().unwrap_or(self.file.as_os_str());
+        let fallback_profile_name = filename.to_string_lossy().into();
         ProfileCreationProps {
-            profile_name,
+            profile_name: self.profile_creation_args.profile_name.clone(),
+            fallback_profile_name,
             main_thread_only: self.profile_creation_args.main_thread_only,
             reuse_threads: self.profile_creation_args.reuse_threads,
             fold_recursive_prefix: self.profile_creation_args.fold_recursive_prefix,
             unlink_aux_files: self.profile_creation_args.unlink_aux_files,
             create_per_cpu_threads: self.profile_creation_args.per_cpu_threads,
+            arg_count_to_include_in_process_name: self.profile_creation_args.include_args,
             override_arch: self.override_arch.clone(),
             unstable_presymbolicate: self.profile_creation_args.unstable_presymbolicate,
             coreclr: to_coreclr_profile_props(&self.coreclr),
@@ -435,11 +539,15 @@ impl ImportArgs {
             unknown_event_markers: self.profile_creation_args.unknown_event_markers,
             #[cfg(not(target_os = "windows"))]
             unknown_event_markers: false,
-            tstart: self.tstart,
-            tstop: self.tstop,
+            #[cfg(target_os = "windows")]
+            time_range: self.time_range,
+            #[cfg(not(target_os = "windows"))]
+            time_range: None,
         }
     }
 
+    // TODO: Use for perf.data import
+    #[allow(unused)]
     fn included_processes(&self) -> Option<IncludedProcesses> {
         match (&self.name, &self.pid) {
             (None, None) => None, // No filtering, include all processes
@@ -461,6 +569,10 @@ impl RecordArgs {
         }
     }
 
+    fn symbol_props(&self) -> SymbolProps {
+        self.symbol_args.symbol_props()
+    }
+
     #[allow(unused)]
     pub fn recording_props(&self) -> RecordingProps {
         let time_limit = self.duration.map(Duration::from_secs_f64);
@@ -472,21 +584,20 @@ impl RecordArgs {
             std::process::exit(1);
         }
         let interval = Duration::from_secs_f64(1.0 / self.rate);
-        cfg_if::cfg_if! {
-            if #[cfg(target_os = "windows")] {
-                let vm_hack = self.vm_hack;
-            } else {
-                let vm_hack = false;
-            }
-        }
-
         RecordingProps {
             output_file: self.output.clone(),
             time_limit,
             interval,
-            vm_hack,
             gfx: self.gfx,
+            browsers: self.browsers,
+            #[cfg(target_os = "windows")]
+            vm_hack: self.vm_hack,
+            #[cfg(not(target_os = "windows"))]
+            vm_hack: false,
+            #[cfg(target_os = "windows")]
             keep_etl: self.keep_etl,
+            #[cfg(not(target_os = "windows"))]
+            keep_etl: false,
         }
     }
 
@@ -525,21 +636,25 @@ impl RecordArgs {
     }
 
     pub fn profile_creation_props(&self) -> ProfileCreationProps {
-        let profile_name = self.profile_creation_args.profile_name.clone();
-        let profile_name = profile_name.unwrap_or_else(|| match self.recording_mode() {
+        let fallback_profile_name = match self.recording_mode() {
             RecordingMode::All => "All processes".to_string(),
             RecordingMode::Pid(pid) => format!("PID {pid}"),
             RecordingMode::Launch(launch_props) => {
-                launch_props.command_name.to_string_lossy().to_string()
+                let filename = Path::new(&launch_props.command_name)
+                    .file_name()
+                    .unwrap_or(launch_props.command_name.as_os_str());
+                filename.to_string_lossy().into()
             }
-        });
+        };
         ProfileCreationProps {
-            profile_name,
+            profile_name: self.profile_creation_args.profile_name.clone(),
+            fallback_profile_name,
             main_thread_only: self.profile_creation_args.main_thread_only,
             reuse_threads: self.profile_creation_args.reuse_threads,
             fold_recursive_prefix: self.profile_creation_args.fold_recursive_prefix,
             unlink_aux_files: self.profile_creation_args.unlink_aux_files,
             create_per_cpu_threads: self.profile_creation_args.per_cpu_threads,
+            arg_count_to_include_in_process_name: self.profile_creation_args.include_args,
             override_arch: None,
             unstable_presymbolicate: self.profile_creation_args.unstable_presymbolicate,
             coreclr: to_coreclr_profile_props(&self.coreclr),
@@ -547,8 +662,7 @@ impl RecordArgs {
             unknown_event_markers: self.profile_creation_args.unknown_event_markers,
             #[cfg(not(target_os = "windows"))]
             unknown_event_markers: false,
-            tstart: None,
-            tstop: None,
+            time_range: None,
         }
     }
 }
@@ -566,10 +680,38 @@ impl ServerArgs {
                 std::process::exit(1)
             }
         };
+
+        // parse address from string
+        let address = match IpAddr::from_str(&self.address) {
+            Ok(addr) => addr,
+            Err(e) => {
+                eprintln!(
+                    "Could not parse address as IpAddr, got address {:?}, error: {}",
+                    self.address, e
+                );
+                std::process::exit(1)
+            }
+        };
+
         ServerProps {
+            address,
             port_selection,
             verbose: self.verbose,
             open_in_browser,
+        }
+    }
+}
+
+impl SymbolArgs {
+    pub fn symbol_props(&self) -> SymbolProps {
+        SymbolProps {
+            symbol_dir: self.symbol_dir.clone(),
+            windows_symbol_server: self.windows_symbol_server.clone(),
+            windows_symbol_cache: self.windows_symbol_cache.clone(),
+            breakpad_symbol_server: self.breakpad_symbol_server.clone(),
+            breakpad_symbol_dir: self.breakpad_symbol_dir.clone(),
+            breakpad_symbol_cache: self.breakpad_symbol_cache.clone(),
+            simpleperf_binary_cache: self.simpleperf_binary_cache.clone(),
         }
     }
 }
@@ -608,93 +750,67 @@ fn split_at_first_equals(s: &OsStr) -> Option<(&OsStr, &OsStr)> {
     Some((name, val))
 }
 
-fn convert_file_to_profile(
-    filename: &Path,
-    input_file: &File,
-    output_filename: &Path,
-    profile_creation_props: ProfileCreationProps,
-    included_processes: Option<IncludedProcesses>,
-) {
-    if filename.extension() == Some(OsStr::new("etl")) {
-        convert_etl_file_to_profile(
-            filename,
-            input_file,
-            output_filename,
-            profile_creation_props,
-            included_processes,
-        );
+fn convert_file_to_profile(input_file: &File, import_args: &ImportArgs) {
+    if import_args.file.extension() == Some(OsStr::new("etl")) {
+        convert_etl_file_to_profile(input_file, import_args);
         return;
     }
 
-    convert_perf_data_file_to_profile(
-        filename,
-        input_file,
-        output_filename,
-        profile_creation_props,
-    );
+    convert_perf_data_file_to_profile(input_file, import_args);
 }
 
 #[cfg(target_os = "windows")]
-fn convert_etl_file_to_profile(
-    filename: &Path,
-    _input_file: &File,
-    output_filename: &Path,
-    profile_creation_props: ProfileCreationProps,
-    included_processes: Option<IncludedProcesses>,
-) {
+fn convert_etl_file_to_profile(_input_file: &File, import_args: &ImportArgs) {
+    let profile_creation_props = import_args.profile_creation_props();
+    let included_processes = import_args.included_processes();
     windows::import::convert_etl_file_to_profile(
-        filename,
-        output_filename,
+        &import_args.file,
+        &import_args.user_etl,
+        &import_args.output,
         profile_creation_props,
         included_processes,
     );
 }
 
 #[cfg(not(target_os = "windows"))]
-fn convert_etl_file_to_profile(
-    filename: &Path,
-    _input_file: &File,
-    _output_filename: &Path,
-    _profile_creation_props: ProfileCreationProps,
-    _included_processes: Option<IncludedProcesses>,
-) {
+fn convert_etl_file_to_profile(_input_file: &File, import_args: &ImportArgs) {
     eprintln!(
         "Error: Could not import ETW trace from file {}",
-        filename.to_string_lossy()
+        import_args.file.to_string_lossy()
     );
     eprintln!("Importing ETW traces is only supported on Windows.");
     std::process::exit(1);
 }
 
-fn convert_perf_data_file_to_profile(
-    filename: &Path,
-    input_file: &File,
-    output_filename: &Path,
-    profile_creation_props: ProfileCreationProps,
-) {
-    let path = Path::new(filename)
+fn convert_perf_data_file_to_profile(input_file: &File, import_args: &ImportArgs) {
+    let path = import_args
+        .file
         .canonicalize()
         .expect("Couldn't form absolute path");
     let file_meta = input_file.metadata().ok();
     let file_mod_time = file_meta.and_then(|metadata| metadata.modified().ok());
+    let profile_creation_props = import_args.profile_creation_props();
+    let mut binary_lookup_dirs = import_args.symbol_props().symbol_dir.clone();
+    let mut aux_file_lookup_dirs = import_args.aux_file_dir.clone();
+    if let Some(parent_dir) = path.parent() {
+        binary_lookup_dirs.push(parent_dir.into());
+        aux_file_lookup_dirs.push(parent_dir.into());
+    }
     let reader = BufReader::new(input_file);
-    let profile =
-        match import::perf::convert(reader, file_mod_time, path.parent(), profile_creation_props) {
-            Ok(profile) => profile,
-            Err(error) => {
-                eprintln!("Error importing perf.data file: {:?}", error);
-                std::process::exit(1);
-            }
-        };
-    let output_file = match File::create(output_filename) {
-        Ok(file) => file,
-        Err(err) => {
-            eprintln!("Couldn't create output file {:?}: {}", output_filename, err);
+    let profile = match import::perf::convert(
+        reader,
+        file_mod_time,
+        binary_lookup_dirs,
+        aux_file_lookup_dirs,
+        profile_creation_props,
+    ) {
+        Ok(profile) => profile,
+        Err(error) => {
+            eprintln!("Error importing perf.data file: {:?}", error);
             std::process::exit(1);
         }
     };
-    let writer = BufWriter::new(output_file);
-    serde_json::to_writer(writer, &profile).expect("Couldn't write converted profile JSON");
+    save_profile_to_file(&profile, &import_args.output).expect("Couldn't write JSON");
 }
 
 #[cfg(test)]

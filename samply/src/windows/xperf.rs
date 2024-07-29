@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::elevated_helper::ElevatedRecordingProps;
@@ -59,12 +60,19 @@ impl Xperf {
 
         user_providers.append(&mut super::coreclr::coreclr_xperf_args(props));
         user_providers.append(&mut super::gfx::gfx_xperf_args(props));
+        user_providers.append(&mut super::firefox::firefox_xperf_args(props));
+        user_providers.append(&mut super::chrome::chrome_xperf_args(props));
+        user_providers.sort_unstable();
+        user_providers.dedup();
 
         let xperf_path = self.get_xperf_path()?;
         // start xperf.exe, logging to the same location as the output file, just with a .etl
         // extension.
         let mut kernel_etl_file = output_path.to_owned();
-        kernel_etl_file.set_extension("unmerged-etl");
+        if kernel_etl_file.extension() == Some(OsStr::new("gz")) {
+            kernel_etl_file.set_extension("");
+        }
+        kernel_etl_file.set_extension("kernel.etl");
 
         const MIN_INTERVAL_NANOS: u64 = 122100; // 8192 kHz
         let interval_nanos = props.interval_nanos.clamp(MIN_INTERVAL_NANOS, u64::MAX);
@@ -92,8 +100,11 @@ impl Xperf {
         xperf.arg(&kernel_etl_file);
 
         let user_etl_file = if !user_providers.is_empty() {
-            let mut user_etl_file = kernel_etl_file.clone();
-            user_etl_file.set_extension("user-unmerged-etl");
+            let mut user_etl_file = output_path.to_owned();
+            if user_etl_file.extension() == Some(OsStr::new("gz")) {
+                user_etl_file.set_extension("");
+            }
+            user_etl_file.set_extension("user.etl");
 
             xperf.arg("-start");
             xperf.arg("SamplySession");
@@ -123,14 +134,15 @@ impl Xperf {
         Ok(())
     }
 
-    pub fn stop_xperf(&mut self) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
+    pub fn stop_xperf(
+        &mut self,
+    ) -> Result<(PathBuf, Option<PathBuf>), Box<dyn Error + Send + Sync>> {
         let prev_state = std::mem::replace(&mut self.state, XperfState::Stopped);
         let (kernel_etl, user_etl) = match prev_state {
             XperfState::Stopped => return Err("xperf wasn't running, can't stop it".into()),
             XperfState::RecordingKernelToFile(kpath) => (kpath, None),
             XperfState::RecordingKernelAndUserToFile(kpath, upath) => (kpath, Some(upath)),
         };
-        let merged_etl = kernel_etl.with_extension("etl");
 
         let xperf_path = self.get_xperf_path()?;
         let mut xperf = std::process::Command::new(xperf_path);
@@ -141,32 +153,13 @@ impl Xperf {
             xperf.arg("SamplySession");
         }
 
-        xperf.arg("-d");
-        xperf.arg(&merged_etl);
-
         let _ = xperf
             .status()
             .expect("Failed to execute xperf -stop! xperf may still be recording.");
 
         eprintln!("xperf session stopped.");
 
-        std::fs::remove_file(&kernel_etl).map_err(|_| {
-            format!(
-                "Failed to delete unmerged ETL file {:?}",
-                kernel_etl.to_str().unwrap()
-            )
-        })?;
-
-        if let Some(user_etl) = &user_etl {
-            std::fs::remove_file(user_etl).map_err(|_| {
-                format!(
-                    "Failed to delete unmerged ETL file {:?}",
-                    user_etl.to_str().unwrap()
-                )
-            })?;
-        }
-
-        Ok(merged_etl)
+        Ok((kernel_etl, user_etl))
     }
 }
 
