@@ -14,9 +14,9 @@ use uuid::Uuid;
 use super::coreclr::CoreClrContext;
 use super::profile_context::ProfileContext;
 use crate::shared::coreclr::CoreClrProviderProps;
-use crate::windows::coreclr::{self, handle_new_coreclr_event};
+use crate::windows::coreclr::handle_new_coreclr_event;
 use crate::windows::etw_coreclr::CoreClrEtwConverter;
-use crate::windows::profile_context::KnownCategory;
+use crate::windows::profile_context::{KnownCategory, PeInfo};
 
 pub fn process_etl_files(
     context: &mut ProfileContext,
@@ -28,7 +28,7 @@ pub fn process_etl_files(
 
     let processing_start_timestamp = Instant::now();
 
-    let mut core_clr_context = CoreClrContext::new(context.creation_props());
+    let mut core_clr_context = CoreClrContext::new(context);
 
     let result = process_trace(
         etl_file,
@@ -70,17 +70,6 @@ fn process_trace(
     let demand_zero_faults = false; //pargs.contains("--demand-zero-faults");
     let mut pending_image_info: Option<((u32, u64), PeInfo)> = None;
 
-    let coreclr_props = context.creation_props().coreclr;
-    let mut core_clr_context = CoreClrContext::new(
-        CoreClrProviderProps {
-            is_attach: false,
-            gc_markers: coreclr_props.gc_markers,
-            gc_suspensions: coreclr_props.gc_suspensions,
-            gc_detailed_allocs: coreclr_props.gc_detailed_allocs,
-            event_stacks: coreclr_props.event_stacks,
-        },
-        false,
-    );
     let mut core_clr_converter = CoreClrEtwConverter::new();
 
     open_trace(etl_file, |e| {
@@ -512,13 +501,13 @@ fn process_trace(
                 }
                 let is_in_range = context.is_in_time_range(timestamp_raw);
                 if let Some(event) = core_clr_converter.etw_event_to_coreclr_event(
-                    &mut core_clr_context,
+                    core_clr_context,
                     &s,
                     &mut parser,
                 ) {
                     handle_new_coreclr_event(
                         context,
-                        &mut core_clr_context,
+                        core_clr_context,
                         &event,
                         is_in_range,
                     );

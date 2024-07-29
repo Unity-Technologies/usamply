@@ -1,9 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::shared::jit_category_manager::JitCategoryManager;
-use crate::shared::jit_function_recycler::JitFunctionRecycler;
 use crate::shared::lib_mappings::{LibMappingAdd, LibMappingInfo, LibMappingOp, LibMappingOpQueue};
 use crate::shared::timestamp_converter::TimestampConverter;
 use debugid::CodeId;
@@ -33,12 +32,10 @@ impl DotnetTraceManager {
 
     pub fn add_dotnet_trace_path(
         &mut self,
-        thread: ThreadHandle,
         path: impl Into<PathBuf>,
-        fallback_dir: Option<PathBuf>,
     ) {
         let path: PathBuf = path.into();
-        eprintln!("Adding dotnet trace path: {:?}", path);
+        log::info!("Adding dotnet trace path: {:?}", path);
         self.pending_trace_paths.push(path);
     }
 
@@ -46,7 +43,6 @@ impl DotnetTraceManager {
         &mut self,
         jit_category_manager: &mut JitCategoryManager,
         profile: &mut Profile,
-        mut recycler: Option<&mut JitFunctionRecycler>,
         timestamp_converter: &TimestampConverter,
     ) {
         self.pending_trace_paths.retain_mut(|path| {
@@ -54,14 +50,14 @@ impl DotnetTraceManager {
                 path: &Path,
                 unlink_after_open: bool,
             ) -> Option<(EventPipeParser<std::fs::File>, PathBuf)> {
-                let mut file = std::fs::File::open(path).ok()?;
-                let mut reader = EventPipeParser::new(file).ok()?;
+                let file = std::fs::File::open(path).ok()?;
+                let reader = EventPipeParser::new(file).ok()?;
                 if unlink_after_open {
                     std::fs::remove_file(&path).ok()?;
                 }
                 Some((reader, path.into()))
             }
-            let Some((reader, actual_path)) = trace_reader_for_path(path, self.unlink_after_open)
+            let Some((reader, _actual_path)) = trace_reader_for_path(path, self.unlink_after_open)
             else {
                 return true;
             };
@@ -91,11 +87,10 @@ impl DotnetTraceManager {
             false // "Do not retain", i.e. remove from pending_jitdump_paths
         });
 
-        for jitdump in &mut self.processors {
-            jitdump.process_pending_records(
+        for nettrace in &mut self.processors {
+            nettrace.process_pending_records(
                 jit_category_manager,
                 profile,
-                recycler.as_deref_mut(),
                 timestamp_converter,
             );
         }
@@ -105,10 +100,9 @@ impl DotnetTraceManager {
         mut self,
         jit_category_manager: &mut JitCategoryManager,
         profile: &mut Profile,
-        recycler: Option<&mut JitFunctionRecycler>,
         timestamp_converter: &TimestampConverter,
     ) -> Vec<LibMappingOpQueue> {
-        self.process_pending_records(jit_category_manager, profile, recycler, timestamp_converter);
+        self.process_pending_records(jit_category_manager, profile, timestamp_converter);
         self.processors
             .into_iter()
             .map(|processor| processor.finish(profile))
@@ -124,6 +118,7 @@ struct SingleDotnetTraceProcessor {
     symbols: Vec<Symbol>,
 
     modules: HashMap<u64, ModuleLoadUnloadEvent>,
+    seen_method_loads: HashSet<(u64, String)>,
 
     /// The relative_address of the next JIT function.
     ///
@@ -143,6 +138,7 @@ impl SingleDotnetTraceProcessor {
             lib_mapping_ops: Default::default(),
             symbols: Default::default(),
             modules: Default::default(),
+            seen_method_loads: Default::default(),
             cumulative_address: 0,
         }
     }
@@ -151,7 +147,6 @@ impl SingleDotnetTraceProcessor {
         &mut self,
         jit_category_manager: &mut JitCategoryManager,
         profile: &mut Profile,
-        mut recycler: Option<&mut JitFunctionRecycler>,
         timestamp_converter: &TimestampConverter,
     ) {
         if self.reader.is_none() {
@@ -170,7 +165,6 @@ impl SingleDotnetTraceProcessor {
                             &coreclr_event,
                             jit_category_manager,
                             profile,
-                            &mut recycler,
                             timestamp_converter,
                         );
                     } else {
@@ -194,7 +188,7 @@ impl SingleDotnetTraceProcessor {
                     return;
                 }
                 Err(err) => {
-                    eprintln!("Got error: {:?}", err);
+                    log::trace!("dotnet trace manager got error, ignoring: {:?}", err);
                     self.lib_mapping_ops
                         .push(last_timestamp, LibMappingOp::Clear);
                     self.close_and_commit_symbol_table(profile);
@@ -209,22 +203,33 @@ impl SingleDotnetTraceProcessor {
         coreclr_event: &CoreClrEvent,
         jit_category_manager: &mut JitCategoryManager,
         profile: &mut Profile,
-        recycler: &mut Option<&mut JitFunctionRecycler>,
-        timestamp_converter: &TimestampConverter,
+        _timestamp_converter: &TimestampConverter,
     ) {
         match coreclr_event {
-            CoreClrEvent::ModuleLoad(event) => {
-                let module_id = event.module_id;
-                self.modules.insert(module_id, event.clone());
+            CoreClrEvent::ModuleLoad(_event) => {
+                //let module_id = event.module_id;
+                //log::trace!("Loading module {} {} at {}", module_id, event.module_il_path, event.common.timestamp);
+                //self.modules.insert(module_id, event.clone());
             }
-            CoreClrEvent::ModuleUnload(event) => {
-                let module_id = event.module_id;
+            CoreClrEvent::ModuleUnload(_event) => {
+                //let module_id = event.module_id;
                 //if let Some(module) = self.modules.remove(&module_id) {
                 //}
             }
             CoreClrEvent::MethodLoad(event) => {
                 let start_avma = event.start_address;
                 let end_avma = event.start_address + event.size as u64;
+
+                let msig = (event.start_address, event.name.name.clone());
+                if !event.dc_end {
+                    self.seen_method_loads.insert(msig);
+                } else {
+                    if self.seen_method_loads.contains(&msig) {
+                        // we already saw a normal MethodLoad for this; skip it, so that
+                        // we don't flag this method as being valid from 0 time
+                        return;
+                    }
+                }
 
                 let relative_address_at_start = self.cumulative_address;
                 self.cumulative_address += event.size;
@@ -240,38 +245,22 @@ impl SingleDotnetTraceProcessor {
                     name: symbol_name.clone(),
                 });
 
-                let (lib_handle, relative_address_at_start) =
-                    if let Some(recycler) = recycler.as_deref_mut() {
-                        recycler.recycle(
-                            start_avma,
-                            end_avma,
-                            relative_address_at_start,
-                            &symbol_name,
-                            self.lib_handle,
-                        )
-                    } else {
-                        (self.lib_handle, relative_address_at_start)
-                    };
+                let lib_handle = self.lib_handle;
 
                 log::trace!(
-                    "MethodLoad: addr = 0x{:x} symbol_name = {:?} size = {}",
-                    start_avma, symbol_name, event.size
+                    "MethodLoad: addr = 0x{:x} symbol_name = {:?} size = {} (dcend = {})",
+                    start_avma, symbol_name, event.size, event.dc_end
                 );
 
                 let (category, js_frame) =
                     jit_category_manager.classify_jit_symbol(&symbol_name, profile);
-                let start_ts = if event.dc_end {
-                    if let Some(module) = self.modules.get(&event.module_id) {
-                        module.common.timestamp
-                    } else {
-                        log::trace!("Module already unloaded {}, using event timestamp...", event.module_id);
-                        event.common.timestamp
-                    }
-                } else {
-                    event.common.timestamp
-                };
+                // If this is a method we haven't seen before but we see it in the DCEnd
+                // rundown, assume that it's valid for the entire range of the trace.
+                // This isn't necessarily correct, but it's the best we can do given
+                // the information we get.
+                let start_ts = if event.dc_end { 0 } else { event.common.timestamp };
 
-                self.lib_mapping_ops.push(
+                self.lib_mapping_ops.push_unsorted(
                     start_ts,
                     LibMappingOp::Add(LibMappingAdd {
                         start_avma,
@@ -281,19 +270,16 @@ impl SingleDotnetTraceProcessor {
                     }),
                 );
             }
-            CoreClrEvent::ReadyToRunMethodEntryPoint(event) => {
-                let address = event.start_address;
-                let name = format!("{}.{}", event.name.namespace, event.name.name);
-
+            CoreClrEvent::ReadyToRunMethodEntryPoint(_event) => {
                 // Can't actually do anything with this, as we don't have a size. These methods just
                 // won't be seen in the profile when we're using tracing only (like when attaching).
             }
-            CoreClrEvent::GcAllocationTick(event) => {}
-            CoreClrEvent::MethodUnload(_) => {}
-            CoreClrEvent::GcTriggered(event) => {}
-            CoreClrEvent::GcSampledObjectAllocation(event) => {}
-            CoreClrEvent::GcStart(event) => {}
-            CoreClrEvent::GcEnd(event) => {}
+            CoreClrEvent::GcAllocationTick(_event) => {}
+            CoreClrEvent::MethodUnload(_event) => {}
+            CoreClrEvent::GcTriggered(_event) => {}
+            CoreClrEvent::GcSampledObjectAllocation(_event) => {}
+            CoreClrEvent::GcStart(_event) => {}
+            CoreClrEvent::GcEnd(_event) => {}
         }
     }
 
@@ -310,7 +296,6 @@ impl SingleDotnetTraceProcessor {
 
     pub fn finish(mut self, profile: &mut Profile) -> LibMappingOpQueue {
         self.close_and_commit_symbol_table(profile);
-        self.lib_mapping_ops.sort();
         self.lib_mapping_ops
     }
 }

@@ -25,26 +25,23 @@ pub fn eventpipe_event_to_coreclr_event(
         },
     };
 
-    match event {
-        EventPipeEvent::ModuleLoad(event) => {
-            Some(CoreClrEvent::ModuleLoad(super::ModuleLoadUnloadEvent {
+    match &event {
+        EventPipeEvent::ModuleLoad(m) |
+        EventPipeEvent::ModuleUnload(m) => {
+            let e = super::ModuleLoadUnloadEvent {
                 common,
-                module_id: event.module_id,
-                assembly_id: event.assembly_id,
-                app_domain_id: event.app_domain_id,
-                module_il_path: event.module_il_path.to_string(),
-                module_native_path: event.module_native_path.to_string(),
-            }))
-        }
-        EventPipeEvent::ModuleUnload(event) => {
-            Some(CoreClrEvent::ModuleUnload(super::ModuleLoadUnloadEvent {
-                common,
-                module_id: event.module_id,
-                assembly_id: event.assembly_id,
-                app_domain_id: event.app_domain_id,
-                module_il_path: event.module_il_path.to_string(),
-                module_native_path: event.module_native_path.to_string(),
-            }))
+                module_id: m.module_id,
+                assembly_id: m.assembly_id,
+                app_domain_id: m.app_domain_id,
+                module_il_path: m.module_il_path.to_string(),
+                module_native_path: m.module_native_path.to_string(),
+            };
+
+            match &event {
+                EventPipeEvent::ModuleLoad(_) => Some(CoreClrEvent::ModuleLoad(e)),
+                EventPipeEvent::ModuleUnload(_) => Some(CoreClrEvent::ModuleUnload(e)),
+                _ => unreachable!()
+            }
         }
         EventPipeEvent::ReadyToRunGetEntryPoint(method) => {
             let name = if method.method_name.is_empty() {
@@ -64,44 +61,17 @@ pub fn eventpipe_event_to_coreclr_event(
                 },
             ))
         }
-        EventPipeEvent::MethodLoad(method) => {
-            let name = if method.method_name.is_empty() {
-                format!("JIT[0x{:x}]", method.method_start_address)
-            } else {
-                method.method_name.to_string()
-            };
-            let tier = (method.method_flags >> 7) & 0x7;
-            let tier = match tier {
-                1 => super::MethodCompilationTier::MinOptJitted,
-                2 => super::MethodCompilationTier::Optimized,
-                3 => super::MethodCompilationTier::QuickJitted,
-                4 => super::MethodCompilationTier::OptimizedTier1,
-                5 => super::MethodCompilationTier::OptimizedTier1OSR,
-                6 => super::MethodCompilationTier::InstrumentedTier,
-                7 => super::MethodCompilationTier::InstrumentedTierOptimized,
-                _ => super::MethodCompilationTier::Unknown,
-            };
-
-            Some(CoreClrEvent::MethodLoad(super::MethodLoadEvent {
-                common,
-                module_id: method.module_id,
-                start_address: method.method_start_address,
-                size: method.method_size,
-                name: CoreClrMethodName {
-                    name,
-                    namespace: method.method_namespace.to_string(),
-                    signature: method.method_signature.to_string(),
-                },
-                tier,
-                dc_end: false,
-            }))
-        }
+        EventPipeEvent::MethodLoad(method) |
         EventPipeEvent::MethodDCEnd(method) => {
             let name = if method.method_name.is_empty() {
                 format!("JIT[0x{:x}]", method.method_start_address)
             } else {
                 method.method_name.to_string()
             };
+            let dc_end = match &event {
+                EventPipeEvent::MethodDCEnd(_) => true,
+                _ => false,
+            };
             let tier = (method.method_flags >> 7) & 0x7;
             let tier = match tier {
                 1 => super::MethodCompilationTier::MinOptJitted,
@@ -125,7 +95,7 @@ pub fn eventpipe_event_to_coreclr_event(
                     signature: method.method_signature.to_string(),
                 },
                 tier,
-                dc_end: true,
+                dc_end
             }))
         }
         EventPipeEvent::MethodUnload(method) => {

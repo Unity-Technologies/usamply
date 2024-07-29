@@ -16,6 +16,7 @@ use crate::shared::recording_props::{CoreClrProfileProps, ProfileCreationProps};
 
 use crate::windows::profile_context::{KnownCategory, ProfileContext};
 
+use super::coreclr::CoreClrContext;
 use super::elevated_helper::ElevatedRecordingProps;
 
 pub struct CoreClrEtwConverter {
@@ -104,16 +105,20 @@ impl CoreClrEtwConverter {
 
         let new_event = match (task, opcode) {
             ("CLRMethod" | "CLRMethodRundown", method_event) => match method_event {
-                "MethodLoadVerbose" | "MethodDCStartVerbose" => {
+                "MethodLoadVerbose" | "MethodDCStartVerbose" | "MethodDCEndVerbose" => {
                     let method_basename: String = parser.parse("MethodName");
                     let method_namespace: String = parser.parse("MethodNamespace");
                     let method_signature: String = parser.parse("MethodSignature");
+                    let module_id: u64 = parser.parse("ModuleID");
 
                     let method_start_address: u64 = parser.parse("MethodStartAddress");
                     let method_size: u32 = parser.parse("MethodSize");
 
+                    let dc_end = method_event == "MethodDCEndVerbose";
+
                     Some(CoreClrEvent::MethodLoad(MethodLoadEvent {
                         common,
+                        module_id,
                         start_address: method_start_address,
                         size: method_size,
                         name: CoreClrMethodName {
@@ -121,6 +126,8 @@ impl CoreClrEtwConverter {
                             namespace: method_namespace,
                             signature: method_signature,
                         },
+                        tier: MethodCompilationTier::Unknown, // TODO
+                        dc_end
                     }))
                 }
                 "ModuleLoad" | "ModuleDCStart" | "ModuleUnload" | "ModuleDCEnd" | _ => None,

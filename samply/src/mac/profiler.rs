@@ -1,7 +1,8 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fs::File;
-use std::process::ExitStatus;
+use std::path::PathBuf;
+use std::process::{ExitStatus, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -38,9 +39,7 @@ pub fn start_recording(
             eprintln!("You can only profile processes which you launch via samply, or attach to via --pid.");
             std::process::exit(1)
         }
-        RecordingMode::Pid(pid: u32) => {
-            profile_name = format!("pid {pid}");
-
+        RecordingMode::Pid(pid) => {
             if profile_creation_props.coreclr.any_enabled() {
                 let coreclr_props = CoreClrProviderProps {
                     is_attach: true,

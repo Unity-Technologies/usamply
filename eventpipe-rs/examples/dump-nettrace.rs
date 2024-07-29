@@ -57,7 +57,34 @@ fn main() {
                         }
                     }
                     DecodedEvent::UnknownEvent => {
-                        println!("Unknown: {} / {}", event.provider_name, event.event_id);
+                        let mut handled = false;
+
+                        if event.provider_name == "Microsoft-Windows-DotNETRuntime" {
+                            handled = true;
+                            match event.event_id {
+                                145 => println!("MethodJittingStarted [Unhandled]"),
+                                146 => println!("MemoryAllocatedForJitCode [Unhandled]"),
+                                _ => handled = false,
+                            }
+                        } else if event.provider_name == "Microsoft-Windows-DotNETRuntimeRundown" {
+                            handled = true;
+                            match event.event_id {
+                                10 => println!("Rundown: GCSettingsRundown [Unhandled]"),
+                                146 => println!("Rundown: DCEndComplete [Unhandled] @ {}", event.timestamp),
+                                148 => println!("Rundown: DCEndInit [Unhandled] @ {}", event.timestamp),
+                                150 => println!("Rundown: MethodDCEndILToNativeMap_V1 [Unhandled]"),
+                                152 => println!("Rundown: DomainModuleDCEnd [Unhandled]"),
+                                154 => println!("Rundown: ModuleDCEnd [Unhandled] @ {}", event.timestamp),
+                                156 => println!("Rundown: AssemblyDCEnd [Unhandled]"),
+                                158 => println!("Rundown: AppDomainDCEnd [Unhandled]"),
+                                187 => println!("Rundown: RuntimeInformationDCStart [Unhandled]"),
+                                _ => handled = false,
+                            }
+                        }
+
+                        if !handled {
+                            println!("Unknown: {} / {}", event.provider_name, event.event_id);
+                        }
                     }
                 }
 

@@ -132,22 +132,30 @@ impl LibMappingsHierarchy {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct LibMappingOpQueue(Vec<(u64, LibMappingOp)>);
+pub struct LibMappingOpQueue(Vec<(u64, LibMappingOp)>, bool);
 
 impl LibMappingOpQueue {
     pub fn push(&mut self, timestamp: u64, op: LibMappingOp) {
         self.0.push((timestamp, op));
     }
 
+    pub fn push_unsorted(&mut self, timestamp: u64, op: LibMappingOp) {
+        self.0.push((timestamp, op));
+        self.1 = true;
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    pub fn into_iter(self) -> LibMappingOpQueueIter {
+    pub fn into_iter(mut self) -> LibMappingOpQueueIter {
+        if self.1 /* unsorted */ {
+            self.sort();
+        }
         LibMappingOpQueueIter(self.0.into_iter().peekable())
     }
 
-    pub fn sort(&mut self) {
+    fn sort(&mut self) {
         self.0.sort_by_key(|(timestamp, _)| *timestamp);
     }
 }

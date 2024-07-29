@@ -615,11 +615,7 @@ impl TaskProfiler {
                         .push((thread_handle, marker_file_path));
                 }
                 ProcessSpecificPath::DotnetTracePath(dotnet_trace_path) => {
-                    self.dotnet_trace_manager.add_dotnet_trace_path(
-                        self.main_thread_handle,
-                        dotnet_trace_path,
-                        None,
-                    );
+                    self.dotnet_trace_manager.add_dotnet_trace_path(dotnet_trace_path);
                 }
             }
         }
@@ -676,7 +672,6 @@ impl TaskProfiler {
         let dotnet_lib_ops = self.dotnet_trace_manager.finish(
             jit_category_manager,
             profile,
-            self.jit_function_recycler.as_mut(),
             &self.timestamp_converter,
         );
 
