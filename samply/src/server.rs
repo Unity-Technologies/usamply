@@ -148,7 +148,7 @@ async fn start_server(
             Some(s) => s.trim_end_matches('/'),
             //None => "https://profiler.firefox.com",
             // At some point a real URL
-            None => "https://profiler.cds.internal.unity3d.com/",
+            None => "https://profiler.cds.internal.unity3d.com",
         };
 
         let encoded_profile_url = utf8_percent_encode(&profile_url, BAD_CHARS).to_string();
