@@ -30,6 +30,8 @@ pub fn process_etl_files(
 
     let mut core_clr_context = CoreClrContext::new(context);
 
+    log::info!("Processing {}...", etl_file.to_string_lossy());
+
     let result = process_trace(
         etl_file,
         context,
@@ -42,6 +44,7 @@ pub fn process_etl_files(
     }
 
     for extra_etl_file in extra_etl_filenames {
+        log::info!("Processing {}...", etl_file.to_string_lossy());
         let result = process_trace(
             extra_etl_file,
             context,
@@ -256,7 +259,16 @@ fn process_trace(
                 let pid = s.process_id(); // there isn't a ProcessId field here
                 let image_base: u64 = parser.try_parse("ImageBase").unwrap();
                 let image_timestamp: u32 = parser.try_parse("TimeDateStamp").unwrap();
-                let image_checksum: u32 = parser.try_parse("ImageChecksum").unwrap();
+                let image_checksum: u32 = if let Ok(checksum) = parser.try_parse("ImageChecksum") {
+                    checksum
+                } else {
+                    // This happens for pid 0 -- there's no ImageChecksum in these events. These will be seen
+                    // when importing/processing a whole-system ETL trace without filtering to processes.
+                    if pid != 0 {
+                        log::warn!("Missing ImageChecksum in KernelTraceControl/ImageID for pid {} image_base {:#x}", pid, image_base);
+                    }
+                    0
+                };
                 let image_size: u32 = parser.try_parse("ImageSize").unwrap();
                 let mut info = PeInfo::new_with_size_and_checksum(image_size, image_checksum);
                 info.image_timestamp = Some(image_timestamp);
