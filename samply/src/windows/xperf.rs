@@ -65,6 +65,10 @@ impl Xperf {
         user_providers.sort_unstable();
         user_providers.dedup();
 
+        // Will go to the elevated process so won't be seen, but one day we'll be able to
+        // run in-process if running as admin
+        log::trace!("xperf user providers: {:?}", user_providers);
+
         let xperf_path = self.get_xperf_path()?;
         // start xperf.exe, logging to the same location as the output file, just with a .etl
         // extension.
@@ -99,6 +103,11 @@ impl Xperf {
         xperf.arg("-f");
         xperf.arg(&kernel_etl_file);
 
+        // 1MB buffers. Default is 64Kb; 1MB is max. Default minimum buffer count
+        // is 64, max is 320, which seems totally reasonable for modern systems.
+        xperf.arg("-BufferSize");
+        xperf.arg("1024");
+
         let user_etl_file = if !user_providers.is_empty() {
             let mut user_etl_file = output_path.to_owned();
             if user_etl_file.extension() == Some(OsStr::new("gz")) {
@@ -114,6 +123,11 @@ impl Xperf {
 
             xperf.arg("-f");
             xperf.arg(&user_etl_file);
+
+            // 1MB buffers. Default is 64Kb; 1MB is max. Default minimum buffer count
+            // is 64, max is 320, which seems totally reasonable for modern systems.
+            xperf.arg("-BufferSize");
+            xperf.arg("1024");
 
             Some(user_etl_file)
         } else {
