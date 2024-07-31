@@ -46,13 +46,82 @@ impl CoreClrEtwConverter {
 
         let mut name_parts = s.name().splitn(3, '/');
         let provider = name_parts.next().unwrap();
-        let task = name_parts.next().unwrap();
-        let opcode = name_parts.next().unwrap();
+        let mut task = name_parts.next().unwrap();
+        let mut opcode = name_parts.next().unwrap();
+
+        //if coreclr_context.last_n != s.name() {
+        //    eprintln!("'{}' => '{}/{}/{}'", s.name(), provider, task, opcode);
+        //    coreclr_context.last_n = s.name().to_string();
+        //}
 
         match provider {
             "Microsoft-Windows-DotNETRuntime" | "Microsoft-Windows-DotNETRuntimeRundown" => {}
             _ => {
                 panic!("Unexpected event {}", s.name())
+            }
+        }
+
+
+        // When working with merged ETL files, the proper task and opcode names appear here, e.g. "CLRMethod/MethodLoadVerbose" or
+        // "CLRMethodRundown/MethodDCStartVerbose". When working with the unmerged user ETL, these show up as e.g. "Method /DCStartVerbose".
+        // Not clear where those names come from the Etw .man file in CoreCLR does have entries for e.g. RuntimePublisher.MethodDCStartVerboseOpcodeMessage
+        // as "DCStartVerbose", but I'm not sure how/why those are referenced here and not in the merged ETL. xperf -a dumper on the unmerged
+        // ETL shows the same (correct) names as the merged ETL.
+        //
+        // We try to hack around this by converting the unmerged name to the converted one here.
+        if task.ends_with(" ") || opcode.ends_with(" ") {
+            task = task.trim();
+            opcode = opcode.trim();
+
+            // Some of these are technically not correct; e.g. the task should be CLRMethodRundown if it's the
+            // rundown provider, but we handle them the same below.
+            match task {
+                "Method" => {
+                    task = "CLRMethod";
+                    opcode = match opcode {
+                        "LoadVerbose" => "MethodLoadVerbose",
+                        "UnloadVerbose" => "MethodUnloadVerbose",
+                        "DCStartVerbose" => "MethodDCStartVerbose",
+                        "DCEndVerbose" => "MethodDCEndVerbose",
+                        "JittingStarted" => "MethodJittingStarted",
+                        _ => opcode.trim(),
+                    };
+                },
+                "Loader" => {
+                    task = "CLRLoader";
+                    opcode = match opcode {
+                        "ModuleDCStart" => "ModuleDCStart",
+                        _ => opcode.trim(),
+                    };
+                },
+                "Runtime" => {
+                    task = "CLRRuntimeInformation";
+                    opcode = match opcode {
+                        _ => opcode.trim(),
+                    };
+                },
+                "GC" => {
+                    task = "GarbageCollection";
+                    opcode = match opcode {
+                        "PerHeapHisory" => opcode,
+                        "GCDynamicEvent" => opcode,
+                        "Start" => "win:Start",
+                        "Stop" => "win:Stop",
+                        "RestartEEStart" => "GCRestartEEBegin",
+                        "RestartEEStop" => "GCRestartEEEnd",
+                        "SuspendEEStart" => "GCSuspendEEBegin",
+                        "SuspendEEStop" => "GCSuspendEEEnd",
+                        _ => opcode.trim(),
+                    };
+                },
+                "ClrStack" => {
+                    task = "CLRStack";
+                    opcode = match opcode {
+                        "Walk" => "CLRStackWalk",
+                        _ => opcode.trim(),
+                    };
+                },
+                _ => {},
             }
         }
 
@@ -116,6 +185,8 @@ impl CoreClrEtwConverter {
 
                     let dc_end = method_event == "MethodDCEndVerbose";
 
+                    //log::trace!("{}: @ {:x} {}::{} {}", opcode, method_start_address, method_namespace, method_basename, method_signature);
+
                     Some(CoreClrEvent::MethodLoad(MethodLoadEvent {
                         common,
                         module_id,
@@ -130,7 +201,11 @@ impl CoreClrEtwConverter {
                         dc_end
                     }))
                 }
-                "ModuleLoad" | "ModuleDCStart" | "ModuleUnload" | "ModuleDCEnd" | _ => None,
+                _ => None,
+            },
+            ("CLRLoader" | "CLRLoaderRundown", loader_event) => match loader_event {
+                // AppDomain, Assembly, Module Load/Unload
+                "ModuleDCStart" | _ => None,
             },
             ("GarbageCollection", gc_event) => {
                 match gc_event {
@@ -156,7 +231,7 @@ impl CoreClrEtwConverter {
                     "Triggered" => {
                         let reason: u32 = parser.parse("Reason");
                         let reason = GcReason::from_u32(reason).unwrap_or_else(|| {
-                            eprintln!("Unknown CLR GC Triggered reason: {}", reason);
+                            log::warn!("Unknown CLR GC Triggered reason: {}", reason);
                             GcReason::Empty
                         });
 
@@ -172,7 +247,7 @@ impl CoreClrEtwConverter {
                         let reason: u32 = parser.parse("Reason");
 
                         let _reason = GcSuspendEeReason::from_u32(reason).unwrap_or_else(|| {
-                            eprintln!("Unknown CLR GCSuspendEEBegin reason: {}", reason);
+                            log::warn!("Unknown CLR GCSuspendEEBegin reason: {}", reason);
                             GcSuspendEeReason::Other
                         });
 
@@ -202,7 +277,7 @@ impl CoreClrEtwConverter {
                         let gc_type = parser.try_parse("Type").ok().and_then(GcType::from_u32);
 
                         let reason = GcReason::from_u32(reason).unwrap_or_else(|| {
-                            eprintln!("Unknown CLR GCStart reason: {}", reason);
+                            log::warn!("Unknown CLR GCStart reason: {}", reason);
                             GcReason::Empty
                         });
 
@@ -248,10 +323,6 @@ impl CoreClrEtwConverter {
                 }
             }
             ("CLRRuntimeInformation", _) => None,
-            ("CLRLoader", _) => {
-                // AppDomain, Assembly, Module Load/Unload
-                None
-            }
             _ => None,
         };
 

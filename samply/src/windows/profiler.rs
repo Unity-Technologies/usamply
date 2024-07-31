@@ -128,11 +128,11 @@ pub fn start_recording(
 
     let (kernel_output_file, user_output_file) = elevated_helper
         .stop_xperf()
-        .expect("Should have produced a merged ETL file");
+        .expect("Should have produced ETL file(s)");
 
     elevated_helper.shutdown();
 
-    eprintln!("Processing ETL trace...");
+    eprintln!("Processing ETL files(s)...");
 
     let output_file = recording_props.output_file.clone();
 

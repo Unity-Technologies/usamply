@@ -25,6 +25,8 @@ pub struct CoreClrContext {
 
     last_marker_on_thread: HashMap<u32, (ThreadHandle, MarkerHandle)>,
     gc_markers_on_thread: HashMap<u32, HashMap<&'static str, SavedMarkerInfo>>,
+
+    pub last_n: String,
 }
 
 impl CoreClrContext {
@@ -35,6 +37,7 @@ impl CoreClrContext {
 
             last_marker_on_thread: HashMap::new(),
             gc_markers_on_thread: HashMap::new(),
+            last_n: String::new(),
         }
     }
 
