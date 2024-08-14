@@ -9,7 +9,6 @@ use std::fmt::Display;
 pub use dotnet_trace_manager::*;
 pub use eventpipe::*;
 pub use events::*;
-pub use markers::*;
 pub use provider::*;
 
 #[derive(Debug, Clone)]

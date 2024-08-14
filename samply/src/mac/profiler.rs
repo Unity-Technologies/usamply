@@ -25,7 +25,7 @@ use crate::shared::symbol_props::SymbolProps;
 pub fn start_recording(
     recording_mode: RecordingMode,
     recording_props: RecordingProps,
-    mut profile_creation_props: ProfileCreationProps,
+    profile_creation_props: ProfileCreationProps,
     symbol_props: SymbolProps,
     server_props: Option<ServerProps>,
 ) -> Result<ExitStatus, MachError> {

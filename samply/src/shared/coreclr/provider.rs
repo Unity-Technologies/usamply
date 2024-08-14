@@ -60,7 +60,7 @@ pub fn coreclr_provider_args(props: CoreClrProviderProps) -> Vec<String> {
             | CORECLR_GC_SAMPLED_OBJECT_ALLOCATION_LOW_KEYWORD;
     }
 
-    verbose_keywords = verbose_keywords | info_keywords;
+    verbose_keywords |= info_keywords;
     info_keywords = 0;
 
     if info_keywords != 0 {

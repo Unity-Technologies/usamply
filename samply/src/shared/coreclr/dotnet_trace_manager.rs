@@ -6,10 +6,9 @@ use crate::shared::jit_category_manager::JitCategoryManager;
 use crate::shared::lib_mappings::{LibMappingAdd, LibMappingInfo, LibMappingOp, LibMappingOpQueue};
 use crate::shared::timestamp_converter::TimestampConverter;
 use debugid::CodeId;
-use eventpipe::{EventPipeParser, NettraceEvent};
+use eventpipe::{EventPipeParser};
 use fxprof_processed_profile::{
-    CategoryHandle, LibraryHandle, LibraryInfo, MarkerTiming, Profile, Symbol, SymbolTable,
-    ThreadHandle,
+    LibraryHandle, LibraryInfo, Profile, Symbol, SymbolTable,
 };
 use wholesym::samply_symbols::debug_id_and_code_id_for_jitdump;
 
@@ -53,7 +52,7 @@ impl DotnetTraceManager {
                 let file = std::fs::File::open(path).ok()?;
                 let reader = EventPipeParser::new(file).ok()?;
                 if unlink_after_open {
-                    std::fs::remove_file(&path).ok()?;
+                    std::fs::remove_file(path).ok()?;
                 }
                 Some((reader, path.into()))
             }
@@ -226,12 +225,10 @@ impl SingleDotnetTraceProcessor {
                 let msig = (event.start_address, event.name.name.clone());
                 if !event.dc_end {
                     self.seen_method_loads.insert(msig);
-                } else {
-                    if self.seen_method_loads.contains(&msig) {
-                        // we already saw a normal MethodLoad for this; skip it, so that
-                        // we don't flag this method as being valid from 0 time
-                        return;
-                    }
+                } else if self.seen_method_loads.contains(&msig) {
+                    // we already saw a normal MethodLoad for this; skip it, so that
+                    // we don't flag this method as being valid from 0 time
+                    return;
                 }
 
                 let relative_address_at_start = self.cumulative_address;

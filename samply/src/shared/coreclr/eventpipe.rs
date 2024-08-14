@@ -18,7 +18,7 @@ pub fn eventpipe_event_to_coreclr_event(
         timestamp: ne.timestamp,
         process_id,
         thread_id: ne.thread_id as u32,
-        stack: if ne.stack.len() > 0 {
+        stack: if !ne.stack.is_empty() {
             Some(ne.stack.clone())
         } else {
             None

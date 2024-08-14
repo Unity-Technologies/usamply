@@ -2,7 +2,6 @@ use fxprof_processed_profile::{
     MarkerFieldFormat, MarkerFieldSchema, MarkerLocation, MarkerSchema, MarkerStaticField, StaticSchemaMarker,
     StringHandle, CategoryHandle, Profile
 };
-use serde_json::json;
 
 // String is type name
 #[derive(Debug, Clone)]
