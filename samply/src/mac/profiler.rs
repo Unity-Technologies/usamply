@@ -32,6 +32,9 @@ pub fn start_recording(
     let output_file = recording_props.output_file.clone();
 
     let mut task_accepter = TaskAccepter::new()?;
+    let mut should_look_for_nettrace = 0;
+
+    let nettrace_path = format!("samply-coreclr-{}.dottrace", uuid::Uuid::new_v4());
 
     let mut root_task_runner: Box<dyn RootTaskRunner> = match recording_mode {
         RecordingMode::All => {
@@ -53,14 +56,14 @@ pub fn start_recording(
                     .arg("-p")
                     .arg(pid.to_string())
                     .arg("-o")
-                    .arg("profile.dottrace")
+                    .arg(nettrace_path.clone())
                     .arg("--providers")
                     .arg(&provider_args.join(","))
                     .stdout(Stdio::null())
                     .spawn()
                     .expect("Failed to spawn dotnet-trace");
 
-                task_accepter.queue_received_stuff(ReceivedStuff::DotnetTracePath(pid, PathBuf::from("profile.dottrace")));
+                task_accepter.queue_received_stuff(ReceivedStuff::DotnetTracePath(pid, PathBuf::from(nettrace_path.clone())));
 
                 Box::new(ExistingProcessRunner::new_with_aux_child(pid, &mut task_accepter, child))
             } else {
@@ -75,7 +78,7 @@ pub fn start_recording(
                 iteration_count,
             } = process_launch_props;
 
-            if profile_creation_props.coreclr.any_enabled() {
+            let task_launcher = if profile_creation_props.coreclr.any_enabled() {
                 // We need to set DOTNET_PerfMapEnabled=3 in the environment if it's not already set.
                 // If we set it, we'll also set unlink_aux_files=true to avoid leaving files
                 // behind in the temp directory. But if it's set manually, assume the user
@@ -91,29 +94,60 @@ pub fn start_recording(
                 };
                 let provider_args = crate::shared::coreclr::coreclr_provider_args(coreclr_props);
 
-                let mut add_env_var = |key: &str, value: &str| {
-                    eprintln!("{key}={value}");
-                    env_vars.push((key.into(), value.into()));
-                };
+                if true {
+                    let mut add_env_var = |key: &str, value: &str| {
+                        eprintln!("{key}={value}");
+                        env_vars.push((key.into(), value.into()));
+                    };
 
-                add_env_var("DOTNET_EnableEventPipe", "1");
-                add_env_var(
-                    "DOTNET_EventPipeOutputPath",
-                    "/tmp/samply-dotnet-{pid}.nettrace",
-                );
-                add_env_var("DOTNET_EventPipeConfig", &provider_args.join(","));
-                if profile_creation_props.coreclr.event_stacks {
-                    add_env_var("DOTNET_EventPipeEnableStackwalk", "1");
+                    add_env_var("DOTNET_EnableEventPipe", "1");
+                    add_env_var(
+                        "DOTNET_EventPipeOutputPath",
+                        "/tmp/samply-dotnet-{pid}.nettrace",
+                    );
+                    //add_env_var("DOTNET_EventPipeConfig", &provider_args.join(","));
+                    add_env_var("DOTNET_EventPipeConfig", &provider_args[0]);
+                    if profile_creation_props.coreclr.event_stacks {
+                        add_env_var("DOTNET_EventPipeEnableStackwalk", "1");
+                    }
+
+                    TaskLauncher::new(
+                        &command_name,
+                        &args,
+                        iteration_count,
+                        &env_vars,
+                        task_accepter.extra_env_vars(),
+                    )?
+                } else {
+                    let mut trace_args: Vec<std::ffi::OsString> = Vec::new();
+
+                    trace_args.push("trace".into());
+                    trace_args.push("collect".into());
+                    trace_args.push("-o".into());
+                    trace_args.push(nettrace_path.clone().into());
+                    trace_args.push("--providers".into());
+                    trace_args.push(provider_args.join(",").into());
+                    trace_args.push("--".into());
+                    trace_args.push(command_name);
+                    trace_args.extend(args);
+
+                    TaskLauncher::new(
+                        &"dotnet".into(),
+                        &trace_args,
+                        iteration_count,
+                        &env_vars,
+                        task_accepter.extra_env_vars(),
+                    )?
                 }
-            }
-
-            let task_launcher = TaskLauncher::new(
-                &command_name,
-                &args,
-                iteration_count,
-                &env_vars,
-                task_accepter.extra_env_vars(),
-            )?;
+            } else {
+                TaskLauncher::new(
+                    &command_name,
+                    &args,
+                    iteration_count,
+                    &env_vars,
+                    task_accepter.extra_env_vars(),
+                )?
+            };
 
             Box::new(task_launcher)
         }
@@ -145,6 +179,12 @@ pub fn start_recording(
             let timeout = Duration::from_secs_f64(1.0);
             match task_accepter.next_message(timeout) {
                 Ok(ReceivedStuff::AcceptedTask(accepted_task)) => {
+                    if should_look_for_nettrace == 2 {
+                        should_look_for_nettrace = 1;
+                        accepted_task.start_execution();
+                        continue;
+                    }
+
                     let pid = accepted_task.get_id();
                     let (path_sender, path_receiver) = unbounded();
                     let send_result = task_sender.send(TaskInitOrShutdown::TaskInit(TaskInit {
@@ -153,6 +193,11 @@ pub fn start_recording(
                         pid,
                         path_receiver,
                     }));
+
+                    if path_senders_per_pid.is_empty() && should_look_for_nettrace == 1 {
+                        task_accepter.queue_received_stuff(ReceivedStuff::DotnetTracePath(pid, PathBuf::from(nettrace_path.clone())));
+                    }
+                    eprintln!("New task: {}", pid);
                     path_senders_per_pid.insert(pid, path_sender);
                     if send_result.is_err() {
                         // The sampler has already shut down. This task arrived too late.
