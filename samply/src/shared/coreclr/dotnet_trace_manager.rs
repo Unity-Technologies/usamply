@@ -75,7 +75,7 @@ impl DotnetTraceManager {
                 debug_name: name.clone(),
                 debug_path: path.clone(),
                 name,
-                path,
+                path: path.clone(),
                 debug_id,
                 code_id: Some(code_id.to_string()),
                 arch: None,
@@ -84,6 +84,9 @@ impl DotnetTraceManager {
 
             self.processors
                 .push(SingleDotnetTraceProcessor::new(reader, lib_handle));
+
+            let _ = std::fs::remove_file(&path).is_err_and(|e| { log::warn!("Failed to remove {}: {}", path, e); true } );
+
             false // "Do not retain", i.e. remove from pending_jitdump_paths
         });
 
