@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, fmt::Display};
+use std::{collections::HashMap, convert::TryInto};
 
 use eventpipe::coreclr::{GcSuspendEeReason, GcType};
 use fxprof_processed_profile::*;
@@ -6,18 +6,13 @@ use num_traits::FromPrimitive;
 
 use etw_reader::{self, schema::TypedEvent};
 use etw_reader::{
-    event_properties_to_string,
     parser::{Parser, TryParse},
 };
 
 use crate::shared::coreclr::*;
-use crate::shared::process_sample_data::SimpleMarker;
-use crate::shared::recording_props::{CoreClrProfileProps, ProfileCreationProps};
 
-use crate::windows::profile_context::{KnownCategory, ProfileContext};
 
 use super::coreclr::CoreClrContext;
-use super::elevated_helper::ElevatedRecordingProps;
 
 pub struct CoreClrEtwConverter {
     last_event_on_thread: HashMap<u32, CoreClrEvent>,
@@ -69,7 +64,7 @@ impl CoreClrEtwConverter {
         // ETL shows the same (correct) names as the merged ETL.
         //
         // We try to hack around this by converting the unmerged name to the converted one here.
-        if task.ends_with(" ") || opcode.ends_with(" ") {
+        if task.ends_with(' ') || opcode.ends_with(' ') {
             task = task.trim();
             opcode = opcode.trim();
 
@@ -96,9 +91,7 @@ impl CoreClrEtwConverter {
                 },
                 "Runtime" => {
                     task = "CLRRuntimeInformation";
-                    opcode = match opcode {
-                        _ => opcode.trim(),
-                    };
+                    opcode = opcode.trim();
                 },
                 "GC" => {
                     task = "GarbageCollection";

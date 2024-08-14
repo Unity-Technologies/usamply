@@ -13,7 +13,6 @@ use etw_reader::{
 
 use crate::shared::coreclr::*;
 use crate::shared::process_sample_data::SimpleMarker;
-use crate::shared::recording_props::{CoreClrProfileProps, ProfileCreationProps};
 
 use crate::windows::profile_context::{KnownCategory, ProfileContext};
 

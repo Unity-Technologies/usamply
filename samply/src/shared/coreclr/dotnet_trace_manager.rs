@@ -208,15 +208,14 @@ impl SingleDotnetTraceProcessor {
         _timestamp_converter: &TimestampConverter,
     ) {
         match coreclr_event {
-            CoreClrEvent::ModuleLoad(_event) => {
-                //let module_id = event.module_id;
+            CoreClrEvent::ModuleLoad(event) => {
+                let module_id = event.module_id;
                 //log::trace!("Loading module {} {} at {}", module_id, event.module_il_path, event.common.timestamp);
-                //self.modules.insert(module_id, event.clone());
+                self.modules.insert(module_id, event.clone());
             }
-            CoreClrEvent::ModuleUnload(_event) => {
-                //let module_id = event.module_id;
-                //if let Some(module) = self.modules.remove(&module_id) {
-                //}
+            CoreClrEvent::ModuleUnload(event) => {
+                let module_id = event.module_id;
+                self.modules.remove(&module_id);
             }
             CoreClrEvent::MethodLoad(event) => {
                 let start_avma = event.start_address;

@@ -13,7 +13,6 @@ use uuid::Uuid;
 
 use super::coreclr::CoreClrContext;
 use super::profile_context::ProfileContext;
-use crate::shared::coreclr::CoreClrProviderProps;
 use crate::windows::coreclr::handle_new_coreclr_event;
 use crate::windows::etw_coreclr::CoreClrEtwConverter;
 use crate::windows::profile_context::{KnownCategory, PeInfo};

@@ -6,10 +6,10 @@ mod provider;
 
 use std::fmt::Display;
 
-pub use dotnet_trace_manager::*;
 pub use eventpipe::*;
 pub use events::*;
 pub use provider::*;
+pub use markers::*;
 
 #[derive(Debug, Clone)]
 pub struct CoreClrProviderProps {
@@ -20,6 +20,7 @@ pub struct CoreClrProviderProps {
     pub event_stacks: bool,
 }
 
+#[allow(dead_code)]
 pub(crate) struct SavedMarkerInfo {
     pub start_timestamp_raw: u64,
     pub name: String,
