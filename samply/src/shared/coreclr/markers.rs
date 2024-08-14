@@ -5,7 +5,7 @@ use fxprof_processed_profile::{
 
 // String is type name
 #[derive(Debug, Clone)]
-pub(crate) struct CoreClrGcAllocTickMarker(pub StringHandle, pub usize, pub usize, pub CategoryHandle);
+pub struct CoreClrGcAllocTickMarker(pub StringHandle, pub usize, pub usize, pub CategoryHandle);
 
 impl StaticSchemaMarker for CoreClrGcAllocTickMarker {
     const UNIQUE_MARKER_TYPE_NAME: &'static str = "GC Alloc Tick";
@@ -73,7 +73,7 @@ impl StaticSchemaMarker for CoreClrGcAllocTickMarker {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CoreClrGcAllocMarker(pub StringHandle, pub usize, pub CategoryHandle);
+pub struct CoreClrGcAllocMarker(pub StringHandle, pub usize, pub CategoryHandle);
 
 impl StaticSchemaMarker for CoreClrGcAllocMarker {
     const UNIQUE_MARKER_TYPE_NAME: &'static str = "GC Alloc";
@@ -130,7 +130,7 @@ impl StaticSchemaMarker for CoreClrGcAllocMarker {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CoreClrGcEventMarker(pub StringHandle, pub StringHandle, pub CategoryHandle);
+pub struct CoreClrGcEventMarker(pub StringHandle, pub StringHandle, pub CategoryHandle);
 
 impl StaticSchemaMarker for CoreClrGcEventMarker {
     const UNIQUE_MARKER_TYPE_NAME: &'static str = "GC Event";
@@ -177,7 +177,7 @@ impl StaticSchemaMarker for CoreClrGcEventMarker {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CoreClrGcMarker(pub CategoryHandle);
+pub struct CoreClrGcMarker(pub CategoryHandle);
 
 impl StaticSchemaMarker for CoreClrGcMarker {
     const UNIQUE_MARKER_TYPE_NAME: &'static str = "GC";
