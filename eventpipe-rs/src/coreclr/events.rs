@@ -42,10 +42,20 @@ use std::{
     io::{Cursor, Read, Seek},
 };
 
-use binrw::{BinRead, BinReaderExt, NullWideString};
+use binrw::{BinRead, BinReaderExt, BinResult, NullWideString};
 use num_derive::{FromPrimitive, ToPrimitive};
 use crate::eventpipe::{MetadataDefinition, NettraceEvent};
 use super::*;
+
+#[binrw::parser(reader, endian)]
+fn parse_null_wide_string_to_string() -> BinResult<String> {
+    let result = NullWideString::read_options(reader, endian, ())?;
+    if result.0.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(result.to_string())
+    }
+}
 
 #[derive(BinRead, Debug)]
 #[br(little, import { version: u32, app_domain: bool })]
@@ -56,22 +66,24 @@ pub struct ModuleLoadUnloadEvent {
     pub app_domain_id: Option<u64>,
     pub module_flags: u32,
     pub _reserved1: u32,
-    pub module_il_path: NullWideString,
-    pub module_native_path: NullWideString,
+    #[br(parse_with = parse_null_wide_string_to_string)]
+    pub module_il_path: String,
+    #[br(parse_with = parse_null_wide_string_to_string)]
+    pub module_native_path: String,
     #[br(if(version >= 1))]
     pub clr_instance_id: Option<u16>,
     #[br(if(version >= 2))]
     pub managed_pdb_signature: [u8; 16],
     #[br(if(version >= 2))]
     pub managed_pdb_age: u32,
-    #[br(if(version >= 2))]
-    pub managed_pdb_build_path: NullWideString,
+    #[br(if(version >= 2), parse_with = parse_null_wide_string_to_string)]
+    pub managed_pdb_build_path: String,
     #[br(if(version >= 2))]
     pub native_pdb_signature: [u8; 16],
     #[br(if(version >= 2))]
     pub native_pdb_age: u32,
-    #[br(if(version >= 2))]
-    pub native_pdb_build_path: NullWideString,
+    #[br(if(version >= 2), parse_with = parse_null_wide_string_to_string)]
+    pub native_pdb_build_path: String,
 }
 
 #[derive(BinRead, Debug)]
@@ -84,14 +96,14 @@ pub struct MethodLoadUnloadEvent {
     pub method_token: u32,
     pub method_flags: u32,
 
-    #[br(if(verbose))]
-    pub method_namespace: NullWideString,
+    #[br(if(verbose), parse_with = parse_null_wide_string_to_string)]
+    pub method_namespace: String,
 
-    #[br(if(verbose))]
-    pub method_name: NullWideString,
+    #[br(if(verbose), parse_with = parse_null_wide_string_to_string)]
+    pub method_name: String,
 
-    #[br(if(verbose))]
-    pub method_signature: NullWideString,
+    #[br(if(verbose), parse_with = parse_null_wide_string_to_string)]
+    pub method_signature: String,
 
     #[br(if(version >= 1, None))]
     pub clr_instance_id: Option<u16>,
@@ -141,8 +153,8 @@ pub struct GcAllocationTickEvent {
     pub allocation_amount64: u64,
     #[br(if(version >= 2))]
     pub type_id: u64, // pointer
-    #[br(if(version >= 2))]
-    pub type_name: NullWideString,
+    #[br(if(version >= 2), parse_with = parse_null_wide_string_to_string)]
+    pub type_name: String,
     #[br(if(version >= 2))]
     pub heap_index: u32,
     #[br(if(version >= 3))]
@@ -165,9 +177,12 @@ pub struct GcSampledObjectAllocationEvent {
 #[br(little, import { version: u32 })]
 pub struct ReadyToRunGetEntryPointEvent {
     pub method_id: u64,
-    pub method_namespace: NullWideString,
-    pub method_name: NullWideString,
-    pub method_signature: NullWideString,
+    #[br(parse_with = parse_null_wide_string_to_string)]
+    pub method_namespace: String,
+    #[br(parse_with = parse_null_wide_string_to_string)]
+    pub method_name: String,
+    #[br(parse_with = parse_null_wide_string_to_string)]
+    pub method_signature: String,
     pub entry_point: u64,
     pub clr_instance_id: u16,
 }
@@ -178,6 +193,8 @@ pub enum CoreClrEvent {
     MethodLoad(MethodLoadUnloadEvent),
     MethodUnload(MethodLoadUnloadEvent),
     GcTriggered(GcTriggeredEvent),
+    GcStart(GcStartEvent),
+    GcEnd(GcEndEvent),
     GcAllocationTick(GcAllocationTickEvent),
     GcSampledObjectAllocation(GcSampledObjectAllocationEvent),
     ReadyToRunGetEntryPoint(ReadyToRunGetEntryPointEvent),

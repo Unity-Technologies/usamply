@@ -16,47 +16,19 @@ use std::mem;
 use helpers::*;
 use crate::eventpipe::NettraceEvent;
 
-#[derive(BinRead, Debug)]
-#[br(little)]
-pub struct StackStack {
-    size: u32,
-
-    // TODO -- support 32-bit here
-    #[br(count = size / 8)]
-    stack: Vec<u64>,
+#[derive(Debug)]
+pub struct EventMetadata {
+    pub timestamp: u64,
+    pub process_id: u32,
+    pub thread_id: u32,
+    pub stack: Option<Vec<u64>>,
 }
 
-#[derive(BinRead, Debug)]
-#[br(little)]
-pub struct StackBlock {
-    #[br(align_after = 4)]
-    size: u32,
-
-    first_id: u32,
-    count: u32,
-
-    #[br(count = count)]
-    stacks: Vec<StackStack>,
-}
-
-#[derive(BinRead, Debug)]
-#[br(little)]
-pub struct ThreadSequenceNumber {
-    thread_id: u64,
-    sequence_number: u32,
-}
-
-#[derive(BinRead, Debug)]
-#[br(little)]
-pub struct SequencePointBlock {
-    #[br(align_after = 4)]
-    size: u32,
-
-    timestamp: u64,
-    thread_count: u32,
-
-    #[br(count = thread_count)]
-    thread_sequence_numbers: Vec<ThreadSequenceNumber>,
+impl EventMetadata {
+    fn with_stack(mut self, stack: Vec<u64>) -> Self {
+        self.stack = Some(stack);
+        self
+    }
 }
 
 pub trait ReaderTrait: Read + Seek + BinReaderExt {}
