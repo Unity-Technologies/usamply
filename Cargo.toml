@@ -11,8 +11,9 @@ members = [
     "wholesym-addr2line",
     "tools/benchmarks",
     "tools/dump_table",
-    "tools/query_api"
-, "eventpipe-rs"]
+    "tools/query_api",
+    "coreclr-tracing"
+]
 exclude = ["etw-reader"] # Should not be compiled on non-Windows
 
 # Config for 'cargo dist'
