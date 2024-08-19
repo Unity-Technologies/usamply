@@ -1,8 +1,9 @@
 #![allow(unused)]
 use std::fs::File;
 
-use eventpipe::*;
-use eventpipe::coreclr::CoreClrEvent;
+use ::eventpipe::*;
+use ::eventpipe::eventpipe::EventPipeParser;
+use ::eventpipe::coreclr::CoreClrEvent;
 
 // https://github.com/microsoft/perfview/blob/main/src/TraceEvent/EventPipe/EventPipeFormat.md
 
@@ -19,7 +20,7 @@ fn main() {
                 //    continue;
                 //}
 
-                match eventpipe::decode_event(&event) {
+                match ::eventpipe::decode_event(&event) {
                     DecodedEvent::CoreClrEvent(coreclr_event) => {
                         match coreclr_event {
                             CoreClrEvent::MethodLoad(event) => {

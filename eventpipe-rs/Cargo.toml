@@ -10,5 +10,9 @@ num-traits = "0.2"
 num-derive = "0.4"
 log = "0.4.21"
 
+[target.'cfg(windows)'.dependencies]
+etw-reader = { path = "../etw-reader" }
+
+# linux-perf-data = "0.10.1"
 [[example]]
 name = "dump-nettrace"
