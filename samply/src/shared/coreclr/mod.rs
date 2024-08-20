@@ -1,15 +1,12 @@
-mod dotnet_trace_manager;
-mod eventpipe;
-mod events;
+mod eventpipe_trace_manager;
 mod markers;
 mod provider;
 
 use std::fmt::Display;
 
-pub use eventpipe::*;
-pub use events::*;
 pub use provider::*;
 pub use markers::*;
+pub(crate) use eventpipe_trace_manager::*;
 
 #[derive(Debug, Clone)]
 pub struct CoreClrProviderProps {

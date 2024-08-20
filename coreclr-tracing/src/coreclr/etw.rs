@@ -1,4 +1,3 @@
-use std::future::pending;
 use std::{collections::HashMap, convert::TryInto};
 
 use crate::EventMetadata;
@@ -37,12 +36,13 @@ impl CoreClrEtwConverter {
         let mut task = name_parts.next().unwrap();
         let mut opcode = name_parts.next().unwrap();
 
-        match provider {
-            "Microsoft-Windows-DotNETRuntime" | "Microsoft-Windows-DotNETRuntimeRundown" => {}
+        let is_rundown = match provider {
+            "Microsoft-Windows-DotNETRuntime" => false,
+            "Microsoft-Windows-DotNETRuntimeRundown" => true,
             _ => {
                 panic!("Unexpected event {}", s.name())
             }
-        }
+        };
 
         // When working with merged ETL files, the proper task and opcode names appear here, e.g. "CLRMethod/MethodLoadVerbose" or
         // "CLRMethodRundown/MethodDCStartVerbose". When working with the unmerged user ETL, these show up as e.g. "Method /DCStartVerbose".
@@ -150,6 +150,7 @@ impl CoreClrEtwConverter {
             process_id: pid,
             thread_id: tid,
             stack: None,
+            is_rundown,
         };
 
         let new_event = match (task, opcode) {
@@ -167,8 +168,6 @@ impl CoreClrEtwConverter {
 
                     let method_start_address: u64 = parser.parse("MethodStartAddress");
                     let method_size: u32 = parser.parse("MethodSize");
-
-                    let dc_end = method_event == "MethodDCEndVerbose";
 
                     //log::trace!("{}: @ {:x} {}::{} {}", opcode, method_start_address, method_namespace, method_basename, method_signature);
 

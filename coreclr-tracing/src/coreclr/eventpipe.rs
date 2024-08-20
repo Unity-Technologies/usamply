@@ -2,9 +2,9 @@ use std::io::Cursor;
 use binrw::*;
 
 use super::*;
-use crate::nettrace::*;
+use crate::{nettrace::*, EventMetadata};
 
-pub fn decode_coreclr_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
+pub fn decode_coreclr_event(event: &NettraceEvent) -> Option<(EventMetadata, CoreClrEvent)> {
     match event.provider_name.as_str() {
         "Microsoft-Windows-DotNETRuntime" => decode_coreclr_regular_event(event),
         "Microsoft-Windows-DotNETRuntimeRundown" => decode_coreclr_rundown_event(event),
@@ -12,9 +12,21 @@ pub fn decode_coreclr_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
     }
 }
 
-fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
+fn to_event_metadata(event: &NettraceEvent, is_rundown: bool) -> EventMetadata {
+    EventMetadata {
+        timestamp: event.timestamp,
+        process_id: u32::MAX, // note: nettrace events don't include the process id, because they come from a single process
+        thread_id: event.thread_id as u32,
+        stack: None,
+        is_rundown,
+    }
+}
+
+fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<(EventMetadata, CoreClrEvent)> {
     let mut payload = Cursor::new(&event.payload);
     //eprintln!("Regular: {:?}", event.event_id);
+
+    let meta = to_event_metadata(event, false);
 
     match event.event_id {
         // 151: DomainModuleLoad
@@ -27,7 +39,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, app_domain: true },
             )
             .unwrap();
-            Some(CoreClrEvent::ModuleLoad(ev))
+            Some((meta, CoreClrEvent::ModuleLoad(ev)))
         }
         152 => {
             // ModuleLoad
@@ -36,7 +48,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, app_domain: false },
             )
             .unwrap();
-            Some(CoreClrEvent::ModuleLoad(ev))
+            Some((meta, CoreClrEvent::ModuleLoad(ev)))
         }
         153 => {
             // ModuleUnload
@@ -45,7 +57,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, app_domain: false },
             )
             .unwrap();
-            Some(CoreClrEvent::ModuleUnload(ev))
+            Some((meta, CoreClrEvent::ModuleUnload(ev)))
         }
         159 => {
             // R2RGetEntryPoint
@@ -54,7 +66,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version },
             )
             .unwrap();
-            Some(CoreClrEvent::ReadyToRunGetEntryPoint(ev))
+            Some((meta, CoreClrEvent::ReadyToRunGetEntryPoint(ev)))
         }
         141 => {
             // MethodLoad
@@ -63,7 +75,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, verbose: false },
             )
             .unwrap();
-            Some(CoreClrEvent::MethodLoad(ev))
+            Some((meta, CoreClrEvent::MethodLoad(ev)))
         }
         142 => {
             // MethodUnload
@@ -72,7 +84,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, verbose: false },
             )
             .unwrap();
-            Some(CoreClrEvent::MethodUnload(ev))
+            Some((meta, CoreClrEvent::MethodUnload(ev)))
         }
         143 => {
             // MethodLoadVerbose
@@ -81,7 +93,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, verbose: true },
             )
             .unwrap();
-            Some(CoreClrEvent::MethodLoad(ev))
+            Some((meta, CoreClrEvent::MethodLoad(ev)))
         }
         144 => {
             // MethodUnloadVerbose
@@ -90,7 +102,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, verbose: true },
             )
             .unwrap();
-            Some(CoreClrEvent::MethodUnload(ev))
+            Some((meta, CoreClrEvent::MethodUnload(ev)))
         }
         35 => {
             // GCTriggered
@@ -99,7 +111,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version },
             )
             .unwrap();
-            Some(CoreClrEvent::GcTriggered(ev))
+            Some((meta, CoreClrEvent::GcTriggered(ev)))
         }
         1 => {
             // GCStart
@@ -131,7 +143,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version },
             )
             .unwrap();
-            Some(CoreClrEvent::GcAllocationTick(ev))
+            Some((meta, CoreClrEvent::GcAllocationTick(ev)))
         }
         20 | 30 => {
             // High | Low, do we really need both of them?
@@ -140,7 +152,7 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version },
             )
             .unwrap();
-            Some(CoreClrEvent::GcSampledObjectAllocation(ev))
+            Some((meta, CoreClrEvent::GcSampledObjectAllocation(ev)))
         }
         // 13: GCFinalizersEnd
         // 14: GCFinalizersBegin
@@ -163,8 +175,10 @@ fn decode_coreclr_regular_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
     }
 }
 
-fn decode_coreclr_rundown_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
+fn decode_coreclr_rundown_event(event: &NettraceEvent) -> Option<(EventMetadata, CoreClrEvent)> {
     let mut payload = Cursor::new(&event.payload);
+
+    let meta = to_event_metadata(event, true);
 
     //eprintln!("RUNDOWN: {:?}", event.event_id);
     match event.event_id {
@@ -175,7 +189,7 @@ fn decode_coreclr_rundown_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
                 binrw::args! { version: event.event_version, verbose: true },
             )
             .unwrap();
-            Some(CoreClrEvent::MethodDCEnd(ev))
+            Some((meta, CoreClrEvent::MethodDCEnd(ev)))
         }
         _ => None,
     }

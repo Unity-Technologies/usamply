@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use std::{collections::HashMap, convert::TryInto, fmt::Display};
 
-use eventpipe::coreclr::{GcSuspendEeReason, GcType};
+use coreclr_tracing::{CoreClrEvent, EventMetadata, GcReason, GcSuspendEeReason, GcType};
 use fxprof_processed_profile::*;
 use num_traits::FromPrimitive;
 
@@ -505,10 +505,11 @@ pub fn handle_coreclr_event(
     }
 }
 
-pub fn handle_new_coreclr_event(
+pub fn handle_coreclr_tracing_event(
     context: &mut ProfileContext,
     coreclr_context: &mut CoreClrContext,
-    event: &CoreClrEvent,
+    event_meta: &EventMetadata,
+    event_coreclr: &CoreClrEvent,
     is_in_time_range: bool,
 ) {
     let (gc_markers, gc_suspensions, gc_allocs) = (
@@ -519,37 +520,37 @@ pub fn handle_new_coreclr_event(
 
     // Handle events that we need to handle whether in time range or not first
 
-    match event {
+    match event_coreclr {
         CoreClrEvent::MethodLoad(e) => {
-            let method_name = e.name.to_string();
+            let method_name = e.method_name.to_string();
             context.handle_coreclr_method_load(
-                e.common.timestamp,
-                e.common.process_id,
+                event_meta.timestamp,
+                event_meta.process_id,
                 method_name,
-                e.start_address,
-                e.size,
+                e.method_start_address,
+                e.method_size,
             );
         }
-        CoreClrEvent::MethodUnload(e) => {
+        CoreClrEvent::MethodUnload(_e) => {
             // don't care
         }
         CoreClrEvent::GcTriggered(e) if is_in_time_range && gc_markers => {
             let category = context.known_category(KnownCategory::CoreClrGc);
             let mh = context.add_thread_instant_marker(
-                e.common.timestamp,
-                e.common.thread_id,
+                event_meta.timestamp,
+                event_meta.thread_id,
                 CoreClrGcMarker(category));
-            coreclr_context.set_last_event_for_thread(e.common.thread_id, mh);
+            coreclr_context.set_last_event_for_thread(event_meta.thread_id, mh);
         }
         CoreClrEvent::GcAllocationTick(e) if is_in_time_range && gc_allocs => {}
         CoreClrEvent::GcSampledObjectAllocation(e) if is_in_time_range && gc_allocs => {
-            let type_name_str = context.intern_profile_string(&format!("{}", DisplayUnknownIfNone(&e.type_name)));
+            let type_name_str = context.intern_profile_string(&format!("type{}", e.type_id));
             let category = context.known_category(KnownCategory::CoreClrGc);
             let mh = context.add_thread_instant_marker(
-                e.common.timestamp,
-                e.common.thread_id,
-                CoreClrGcAllocMarker(type_name_str, e.total_size as usize, category));
-            coreclr_context.set_last_event_for_thread(e.common.thread_id, mh);
+                event_meta.timestamp,
+                event_meta.thread_id,
+                CoreClrGcAllocMarker(type_name_str, e.total_size_for_type_sample as usize, category));
+            coreclr_context.set_last_event_for_thread(event_meta.thread_id, mh);
         }
         CoreClrEvent::GcStart(e) if is_in_time_range && gc_markers => {
             // TODO: save this as a CoreClrGcDetailedMarker, instead of putting
@@ -557,7 +558,7 @@ pub fn handle_new_coreclr_event(
             /*
             // TODO: use gc_type_str as the name
             coreclr_context.save_gc_marker(
-                e.common.thread_id,
+                event_meta.thread_id,
                 e.common.timestamp,
                 format!(
                     "{}: {} (GC #{}, gen{})",
@@ -571,11 +572,11 @@ pub fn handle_new_coreclr_event(
         }
         CoreClrEvent::GcEnd(e) if is_in_time_range && gc_markers => {
             /*
-            if let Some(info) = coreclr_context.remove_gc_marker(e.common.thread_id, "GC") {
+            if let Some(info) = coreclr_context.remove_gc_marker(event_meta.thread_id, "GC") {
                 context.add_thread_interval_marker(
                     info.start_timestamp_raw,
                     e.common.timestamp,
-                    e.common.thread_id,
+                    event_meta.thread_id,
                     KnownCategory::CoreClrGc,
                     &info.name,
                     CoreClrGcEventMarker(info.description),

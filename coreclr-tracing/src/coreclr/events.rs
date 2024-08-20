@@ -35,16 +35,12 @@
 // CLRRuntimeInformation
 // CLRLoader
 
-use bitflags::bitflags;
+// This is only here because there's a macro definition of "version" below that is unused, but is
+// present so that the parsing code can pass consistent variables to everything.  I don't know how to
+// mark it as unused in just that definition.
+#![allow(unused_variables)] 
 
-use std::{
-    fmt::Display,
-    io::{Cursor, Read, Seek},
-};
-
-use binrw::{BinRead, BinReaderExt, BinResult, NullWideString};
-use num_derive::{FromPrimitive, ToPrimitive};
-use crate::nettrace::{MetadataDefinition, NettraceEvent};
+use binrw::{BinRead, BinResult, NullWideString};
 use super::*;
 
 #[binrw::parser(reader, endian)]
@@ -57,7 +53,7 @@ fn parse_null_wide_string_to_string() -> BinResult<String> {
     }
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32, app_domain: bool })]
 pub struct ModuleLoadUnloadEvent {
     pub module_id: u64,
@@ -86,7 +82,7 @@ pub struct ModuleLoadUnloadEvent {
     pub native_pdb_build_path: String,
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32, verbose: bool })]
 pub struct MethodLoadUnloadEvent {
     pub method_id: u64,
@@ -112,14 +108,14 @@ pub struct MethodLoadUnloadEvent {
     pub re_jit_id: Option<u64>,
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32 })]
 pub struct GcTriggeredEvent {
     pub reason: GcReason,
     pub clr_instance_id: u16,
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32 })]
 pub struct GcStartEvent {
     pub count: u32,
@@ -134,7 +130,7 @@ pub struct GcStartEvent {
     pub client_sequence_number: Option<u64>,
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32 })]
 pub struct GcEndEvent {
     pub count: u32,
@@ -143,7 +139,7 @@ pub struct GcEndEvent {
     pub reason: Option<GcReason>,
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32 })]
 pub struct GcAllocationTickEvent {
     pub allocation_amount: u32,
@@ -163,7 +159,7 @@ pub struct GcAllocationTickEvent {
     pub object_size: Option<u64>,
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32 })]
 pub struct GcSampledObjectAllocationEvent {
     pub address: u64, // pointer
@@ -173,7 +169,7 @@ pub struct GcSampledObjectAllocationEvent {
     pub clr_instance_id: u16,
 }
 
-#[derive(BinRead, Debug)]
+#[derive(BinRead, Debug, Clone)]
 #[br(little, import { version: u32 })]
 pub struct ReadyToRunGetEntryPointEvent {
     pub method_id: u64,
@@ -187,6 +183,7 @@ pub struct ReadyToRunGetEntryPointEvent {
     pub clr_instance_id: u16,
 }
 
+#[derive(Debug, Clone)]
 pub enum CoreClrEvent {
     ModuleLoad(ModuleLoadUnloadEvent),
     ModuleUnload(ModuleLoadUnloadEvent),

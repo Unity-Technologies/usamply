@@ -3,7 +3,7 @@ use binrw::{binrw, BinRead, BinReaderExt, BinResult, NullWideString};
 use std::fmt::Display;
 use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
 
-use crate::coreclr;
+use crate::{coreclr, EventMetadata};
 
 mod helpers;
 
@@ -305,7 +305,7 @@ pub struct NettraceEvent {
 pub trait ReaderTrait: Read + Seek + BinReaderExt {}
 
 pub enum DecodedEvent {
-    CoreClrEvent(coreclr::CoreClrEvent),
+    CoreClrEvent((EventMetadata, coreclr::CoreClrEvent)),
     UnknownEvent,
 }
 
@@ -313,7 +313,7 @@ pub fn decode_event(event: &NettraceEvent) -> DecodedEvent {
     match event.provider_name.as_str() {
         "Microsoft-Windows-DotNETRuntime" | "Microsoft-Windows-DotNETRuntimeRundown" => {
             coreclr::eventpipe::decode_coreclr_event(event)
-                .map(|x| DecodedEvent::CoreClrEvent(x))
+                .map(DecodedEvent::CoreClrEvent)
                 .unwrap_or_else(|| DecodedEvent::UnknownEvent)
         }
         _ => DecodedEvent::UnknownEvent,

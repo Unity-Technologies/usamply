@@ -11,11 +11,10 @@ use etw_reader::{
 use fxprof_processed_profile::debugid;
 use uuid::Uuid;
 
-use super::coreclr::CoreClrContext;
+use super::coreclr::{CoreClrContext, handle_coreclr_tracing_event};
 use super::profile_context::ProfileContext;
-use crate::windows::coreclr::handle_new_coreclr_event;
-use crate::windows::etw_coreclr::CoreClrEtwConverter;
 use crate::windows::profile_context::{KnownCategory, PeInfo};
+use coreclr_tracing::etw::CoreClrEtwConverter;
 
 pub fn process_etl_files(
     context: &mut ProfileContext,
@@ -512,14 +511,14 @@ fn process_trace(
                 }
                 let is_in_range = context.is_in_time_range(timestamp_raw);
                 if let Some(event) = core_clr_converter.etw_event_to_coreclr_event(
-                    core_clr_context,
                     &s,
                     &mut parser,
                 ) {
-                    handle_new_coreclr_event(
+                    handle_coreclr_tracing_event(
                         context,
                         core_clr_context,
-                        &event,
+                        &event.0,
+                        &event.1,
                         is_in_range,
                     );
                 }

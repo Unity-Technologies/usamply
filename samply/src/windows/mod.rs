@@ -1,7 +1,6 @@
 mod chrome;
 mod coreclr;
 mod elevated_helper;
-mod etw_coreclr;
 mod etw_gecko;
 mod firefox;
 mod gfx;

@@ -20,7 +20,7 @@ fn main() {
                 //}
 
                 match coreclr_tracing::nettrace::decode_event(&event) {
-                    DecodedEvent::CoreClrEvent(coreclr_event) => {
+                    DecodedEvent::CoreClrEvent((meta, coreclr_event)) => {
                         match coreclr_event {
                             CoreClrEvent::MethodLoad(event) => {
                                 println!(

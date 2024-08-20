@@ -434,6 +434,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 
 [[package]]
+name = "coreclr-tracing"
+version = "0.1.0"
+dependencies = [
+ "binrw",
+ "bitflags 2.5.0",
+ "etw-reader",
+ "log",
+ "num-derive",
+ "num-traits",
+]
+
+[[package]]
 name = "cpp_demangle"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -639,17 +651,6 @@ dependencies = [
  "num-traits",
  "once_cell",
  "windows 0.56.0",
-]
-
-[[package]]
-name = "eventpipe"
-version = "0.1.0"
-dependencies = [
- "binrw",
- "bitflags 2.5.0",
- "log",
- "num-derive",
- "num-traits",
 ]
 
 [[package]]
@@ -2459,12 +2460,12 @@ dependencies = [
  "byteorder",
  "cfg-if",
  "clap",
+ "coreclr-tracing",
  "crossbeam-channel",
  "ctrlc",
  "debugid",
  "env_logger",
  "etw-reader",
- "eventpipe",
  "flate2",
  "framehop",
  "fs4",

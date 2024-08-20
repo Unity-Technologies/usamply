@@ -34,7 +34,7 @@ use super::proc_maps::{
 };
 use super::sampler::{ProcessSpecificPath, TaskInit};
 use super::thread_profiler::{get_thread_id, get_thread_name, ThreadProfiler};
-use crate::shared::coreclr::DotnetTraceManager;
+use crate::shared::coreclr::EventpipeTraceManager;
 use crate::shared::jit_category_manager::JitCategoryManager;
 use crate::shared::jit_function_recycler::JitFunctionRecycler;
 use crate::shared::jitdump_manager::JitDumpManager;
@@ -111,7 +111,7 @@ pub struct TaskProfiler {
     unwinder: UnwinderNative<UnwindSectionBytes, MayAllocateDuringUnwind>,
     path_receiver: Receiver<ProcessSpecificPath>,
     jitdump_manager: JitDumpManager,
-    dotnet_trace_manager: DotnetTraceManager,
+    dotnet_trace_manager: EventpipeTraceManager,
     marker_file_paths: Vec<(ThreadHandle, PathBuf)>,
     unresolved_samples: UnresolvedSamples,
     lib_mapping_ops: LibMappingOpQueue,
@@ -306,7 +306,7 @@ impl TaskProfiler {
             unwinder: UnwinderNative::new(),
             path_receiver,
             jitdump_manager: JitDumpManager::new(profile_creation_props.unlink_aux_files),
-            dotnet_trace_manager: DotnetTraceManager::new(profile_creation_props.unlink_aux_files),
+            dotnet_trace_manager: EventpipeTraceManager::new(profile_creation_props.unlink_aux_files),
             marker_file_paths: Vec::new(),
             lib_mapping_ops: Default::default(),
             unresolved_samples: Default::default(),
@@ -615,7 +615,7 @@ impl TaskProfiler {
                         .push((thread_handle, marker_file_path));
                 }
                 ProcessSpecificPath::DotnetTracePath(dotnet_trace_path) => {
-                    self.dotnet_trace_manager.add_dotnet_trace_path(dotnet_trace_path);
+                    self.dotnet_trace_manager.add_dotnet_trace_path(dotnet_trace_path, self.pid);
                 }
             }
         }

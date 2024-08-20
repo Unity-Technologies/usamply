@@ -216,7 +216,7 @@ where
         }
 
         let trace_info = NettraceTraceObject::read(&mut self.stream)?;
-        self.trace_info = Some(trace_info.clone());
+        self.trace_info = Some(trace_info);
 
         self.read_object_end()?;
 

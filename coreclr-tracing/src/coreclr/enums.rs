@@ -2,8 +2,8 @@ use bitflags::bitflags;
 
 use std::fmt::Display;
 
-use binrw::{BinRead, BinReaderExt, NullWideString};
-use num_derive::{FromPrimitive, ToPrimitive};
+use binrw::BinRead;
+use num_derive::FromPrimitive;
 
 #[derive(BinRead, Debug, FromPrimitive, Clone, Copy)]
 #[br(repr = u32)]
