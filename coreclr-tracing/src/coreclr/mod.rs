@@ -1,13 +1,8 @@
 mod enums;
 mod events;
-mod nettrace;
-
+pub mod eventpipe;
 #[cfg(windows)]
-mod etw;
+pub mod etw;
 
 pub use enums::*;
 pub use events::*;
-pub use nettrace::*;
-
-#[cfg(windows)]
-pub use etw::*;

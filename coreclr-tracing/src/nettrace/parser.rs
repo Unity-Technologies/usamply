@@ -7,6 +7,7 @@ use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
 use std::mem;
 
 use super::*;
+use super::helpers::*;
 use crate::*;
 
 trait ReadExactlyExt {

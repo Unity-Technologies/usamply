@@ -44,7 +44,7 @@ use std::{
 
 use binrw::{BinRead, BinReaderExt, BinResult, NullWideString};
 use num_derive::{FromPrimitive, ToPrimitive};
-use crate::eventpipe::{MetadataDefinition, NettraceEvent};
+use crate::nettrace::{MetadataDefinition, NettraceEvent};
 use super::*;
 
 #[binrw::parser(reader, endian)]

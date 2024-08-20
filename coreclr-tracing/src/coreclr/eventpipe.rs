@@ -1,5 +1,8 @@
+use std::io::Cursor;
+use binrw::*;
+
 use super::*;
-use crate::*;
+use crate::nettrace::*;
 
 pub fn decode_coreclr_event(event: &NettraceEvent) -> Option<CoreClrEvent> {
     match event.provider_name.as_str() {

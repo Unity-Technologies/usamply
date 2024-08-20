@@ -1,12 +1,11 @@
-use binrw::io::TakeSeekExt;
+#![allow(unused)]
 use binrw::{binrw, BinRead, BinReaderExt, BinResult, NullWideString};
-use std::collections::HashMap;
 use std::fmt::Display;
-use std::fs::File;
 use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
-use std::mem;
 
-use crate::helpers::*;
+use crate::coreclr;
+
+mod helpers;
 
 pub mod parser;
 pub use parser::*;
@@ -301,4 +300,22 @@ pub struct NettraceEvent {
     pub related_activity_id: [u8; 16],
 
     pub payload: Vec<u8>,
+}
+
+pub trait ReaderTrait: Read + Seek + BinReaderExt {}
+
+pub enum DecodedEvent {
+    CoreClrEvent(coreclr::CoreClrEvent),
+    UnknownEvent,
+}
+
+pub fn decode_event(event: &NettraceEvent) -> DecodedEvent {
+    match event.provider_name.as_str() {
+        "Microsoft-Windows-DotNETRuntime" | "Microsoft-Windows-DotNETRuntimeRundown" => {
+            coreclr::eventpipe::decode_coreclr_event(event)
+                .map(|x| DecodedEvent::CoreClrEvent(x))
+                .unwrap_or_else(|| DecodedEvent::UnknownEvent)
+        }
+        _ => DecodedEvent::UnknownEvent,
+    }
 }

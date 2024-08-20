@@ -2,8 +2,7 @@
 use std::fs::File;
 
 use coreclr_tracing::*;
-use coreclr_tracing::coreclr::*;
-use coreclr_tracing::eventpipe::*;
+use coreclr_tracing::nettrace::*;
 
 // https://github.com/microsoft/perfview/blob/main/src/TraceEvent/EventPipe/EventPipeFormat.md
 
@@ -20,7 +19,7 @@ fn main() {
                 //    continue;
                 //}
 
-                match coreclr_tracing::decode_event(&event) {
+                match coreclr_tracing::nettrace::decode_event(&event) {
                     DecodedEvent::CoreClrEvent(coreclr_event) => {
                         match coreclr_event {
                             CoreClrEvent::MethodLoad(event) => {
