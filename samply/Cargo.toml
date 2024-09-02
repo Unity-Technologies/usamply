@@ -1,6 +1,6 @@
 [package]
 name = "usamply"
-version = "0.12.10-prerelease.1"
+version = "0.12.10-prerelease.2"
 authors = ["Markus Stange <mstange@themasta.com>", "Vladimir Vukicevic <vladimir@pobox.com>"]
 edition = "2021"
 rust-version = "1.75" # needed by wholesym -> fs4
