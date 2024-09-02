@@ -25,19 +25,19 @@ on:
     outputs:
       publishing:
         description: Publishing
-        value: {{ jobs.plan.outputs.publishing }}
+        value: ${{ jobs.plan.outputs.publishing }}
       build_global_result:
         description: Build Global Result
-        value: {{ jobs.build_global_artifacts.result }}
+        value: ${{ jobs.build_global_artifacts.result }}
       build_local_result:
         description: Build Local Result
-        value: {{ jobs.build_local_artifacts.result }}
+        value: ${{ jobs.build_local_artifacts.result }}
       tag:
         description: Tag
-        value: {{ jobs.plan.outputs.tag }}
+        value: ${{ jobs.plan.outputs.tag }}
       tag_flag:
         description: Tag Flag
-        value: {{ jobs.plan.outputs.tag_flag }}
+        value: ${{ jobs.plan.outputs.tag_flag }}
 
 jobs:
   # Run 'cargo dist plan' (or host) to determine what tasks we need to do
