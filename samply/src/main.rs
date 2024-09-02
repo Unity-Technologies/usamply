@@ -299,6 +299,10 @@ struct ServerArgs {
     /// Print debugging output.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Auto-upload the profile and print the result URL
+    #[arg(long)]
+    auto_upload_profile: bool,
 }
 
 /// Arguments describing where to obtain symbol files.
@@ -705,6 +709,7 @@ impl ServerArgs {
             port_selection,
             verbose: self.verbose,
             open_in_browser,
+            auto_upload_profile: self.auto_upload_profile,
         }
     }
 }

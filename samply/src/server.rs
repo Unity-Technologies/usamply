@@ -33,6 +33,7 @@ pub struct ServerProps {
     pub port_selection: PortSelection,
     pub verbose: bool,
     pub open_in_browser: bool,
+    pub auto_upload_profile: bool,
 }
 
 #[tokio::main]
@@ -136,6 +137,7 @@ async fn start_server(
     let path_prefix = format!("/{token}");
     let server_origin = format!("http://{addr}");
     let symbol_server_url = format!("{server_origin}{path_prefix}");
+    let and_auto_upload_reply_url = if server_props.auto_upload_profile { format!("&autoUploadReplyUrl={symbol_server_url}/auto-upload-reply/v1") } else { "".to_owned() };
     let mut template_values: HashMap<&'static str, String> = HashMap::new();
     template_values.insert("SERVER_URL", server_origin.clone());
     template_values.insert("PATH_PREFIX", path_prefix.clone());
@@ -155,7 +157,7 @@ async fn start_server(
         let encoded_symbol_server_url =
             utf8_percent_encode(&symbol_server_url, BAD_CHARS).to_string();
         let profiler_url = format!(
-            "{profiler_origin}/from-url/{encoded_profile_url}/?symbolServer={encoded_symbol_server_url}"
+            "{profiler_origin}/from-url/{encoded_profile_url}/?symbolServer={encoded_symbol_server_url}{and_auto_upload_reply_url}"
         );
         template_values.insert("PROFILER_URL", profiler_url.clone());
         template_values.insert("PROFILE_URL", profile_url);

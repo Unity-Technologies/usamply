@@ -204,6 +204,9 @@ impl<'a, H: FileAndPathHelper> Api<'a, H> {
         } else if request_url == "/asm/v1" {
             let asm_api = AsmApi::new(self.symbol_manager);
             asm_api.query_api_json(request_json_data).await
+        } else if request_url == "/auto-upload-reply/v1" {
+            println!("AUTO_UPLOAD_REPLY: {}", request_json_data);
+            "".to_owned()
         } else {
             json!({ "error": format!("Unrecognized URL {request_url}") }).to_string()
         }
