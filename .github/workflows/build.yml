@@ -17,6 +17,9 @@ permissions:
   contents: write
 
 on:
+  push:
+    paths:
+      - './.github/workflows/build.yml'
   workflow_dispatch:
   workflow_call:
     outputs:
