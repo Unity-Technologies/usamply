@@ -268,6 +268,9 @@ impl<'a, H: FileAndPathHelper + 'static> Api<'a, H> {
         } else if request_url == "/asm/v1" {
             let asm_api = AsmApi::new(self.symbol_manager);
             Ok(asm_api.query_api_json(request_json_data).await?.into())
+        } else if request_url == "/auto-upload-reply/v1" {
+            println!("AUTO_UPLOAD_REPLY: {}", request_json_data);
+            Ok(QueryApiJsonResult::Err(Error::UnrecognizedUrl("".into())))
         } else {
             Err(Error::UnrecognizedUrl(request_url.into()))
         }
