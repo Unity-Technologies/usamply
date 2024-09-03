@@ -205,8 +205,11 @@ impl<'a, H: FileAndPathHelper> Api<'a, H> {
             let asm_api = AsmApi::new(self.symbol_manager);
             asm_api.query_api_json(request_json_data).await
         } else if request_url == "/auto-upload-reply/v1" {
-            println!("AUTO_UPLOAD_REPLY: {}", request_json_data);
-            "".to_owned()
+            use std::io::Write;
+
+            println!("SAMPLY_AUTO_UPLOAD_REPLY: {}", request_json_data);
+            let _ = std::io::stdout().flush();
+            std::process::exit(0);
         } else {
             json!({ "error": format!("Unrecognized URL {request_url}") }).to_string()
         }
