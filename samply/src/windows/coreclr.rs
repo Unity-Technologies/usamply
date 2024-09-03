@@ -522,7 +522,10 @@ pub fn handle_coreclr_tracing_event(
 
     match event_coreclr {
         CoreClrEvent::MethodLoad(e) => {
-            let method_name = e.method_name.to_string();
+            let method_basename = e.method_name.to_string();
+            let method_namespace = e.method_namespace.to_string();
+            let method_signature = e.method_signature.to_string();
+            let method_name = format!("{method_basename} [{method_namespace}] \u{2329}{method_signature}\u{232a}");
             context.handle_coreclr_method_load(
                 event_meta.timestamp,
                 event_meta.process_id,
