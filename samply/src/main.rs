@@ -301,7 +301,7 @@ struct ServerArgs {
     verbose: bool,
 
     /// Auto-upload the profile and print the result URL as JSON prefixed
-    /// with SAMPLY_AUTO_UPLOAD_URL. The samply process will exit after the upload.
+    /// with SAMPLY_AUTO_UPLOAD_REPLY. The samply process will exit after the upload.
     #[arg(long)]
     auto_upload_profile: bool,
 }
