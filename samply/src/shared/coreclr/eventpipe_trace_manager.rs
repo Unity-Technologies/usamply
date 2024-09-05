@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::shared::coreclr::CoreClrMethodName;
 use crate::shared::jit_category_manager::JitCategoryManager;
 use crate::shared::lib_mappings::{LibMappingAdd, LibMappingInfo, LibMappingOp, LibMappingOpQueue};
 use crate::shared::timestamp_converter::TimestampConverter;
@@ -216,6 +217,12 @@ impl SingleDotnetTraceProcessor {
             }
             CoreClrEvent::MethodLoad(event) |
             CoreClrEvent::MethodDCEnd(event) => {
+                // eventpipe traces on Mac/Linux only include R2R method loads as DCEnd events
+                // during end rundown. This is broken; they should be at worst DCStart events
+                // in a start rundown, and ideally regular MethodLoad events as long as the r2r
+                // shared library is loaded dynamically. We still have to deal with this, though:
+                // the one thing we don't get is an accurate time range for the r2r methods. We
+                // assume they start at 0 time, which is not correct for later-loaded assemblies.
                 let dc_end = match event_coreclr {
                     CoreClrEvent::MethodDCEnd(_) => true,
                     _ => false,
@@ -236,7 +243,11 @@ impl SingleDotnetTraceProcessor {
                 let relative_address_at_start = self.cumulative_address;
                 self.cumulative_address += event.method_size;
 
-                let symbol_name = event.method_name.to_string();
+                let symbol_name = CoreClrMethodName::format(
+                    &event.method_name,
+                    &event.method_namespace,
+                    &event.method_signature,
+                );
                 self.symbols.push(Symbol {
                     address: relative_address_at_start,
                     size: if event.method_size == 0 {

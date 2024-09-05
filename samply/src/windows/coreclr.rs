@@ -221,7 +221,7 @@ pub fn handle_coreclr_event(
                 // there's some stuff in MethodFlags -- might be tiered JIT info?
                 // also ClrInstanceID -- we probably won't have more than one runtime, but maybe.
 
-                let method_name = format!("{method_basename} [{method_namespace}] \u{2329}{method_signature}\u{232a}");
+                let method_name = CoreClrMethodName::format(&method_basename, &method_namespace, &method_signature);
 
                 context.handle_coreclr_method_load(timestamp_raw, pid, method_name, method_start_address, method_size);
                 handled = true;
@@ -525,7 +525,7 @@ pub fn handle_coreclr_tracing_event(
             let method_basename = e.method_name.to_string();
             let method_namespace = e.method_namespace.to_string();
             let method_signature = e.method_signature.to_string();
-            let method_name = format!("{method_basename} [{method_namespace}] \u{2329}{method_signature}\u{232a}");
+            let method_name = CoreClrMethodName::format(&method_basename, &method_namespace, &method_signature);
             context.handle_coreclr_method_load(
                 event_meta.timestamp,
                 event_meta.process_id,

@@ -31,14 +31,20 @@ pub struct CoreClrMethodName {
     pub signature: String,
 }
 
+impl CoreClrMethodName {
+    pub fn format(name: &str, namespace: &str, signature: &str) -> String {
+        // \u{2329} \u{232a} are fancy angle brackets
+        format!(
+            "{name} [{namespace}] \u{2329}{signature}\u{232a}",
+            name = name,
+            namespace = namespace,
+            signature = signature
+        )
+    }
+}
+
 impl Display for CoreClrMethodName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{name} [{namespace}] \u{2329}{signature}\u{232a}",
-            name = self.name,
-            namespace = self.namespace,
-            signature = self.signature
-        )
+        f.write_str(&CoreClrMethodName::format(&self.name, &self.namespace, &self.signature))
     }
 }
