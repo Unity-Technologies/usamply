@@ -263,13 +263,9 @@ struct RecordArgs {
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
 enum CoreClrArgs {
     Enabled,
-    #[cfg(target_os = "windows")]
     GcMarkers,
-    #[cfg(target_os = "windows")]
     GcSuspendedThreads,
-    #[cfg(target_os = "windows")]
     GcDetailedAllocs,
-    #[cfg(target_os = "windows")]
     EventStacks,
 }
 
@@ -734,13 +730,9 @@ fn to_coreclr_profile_props(coreclr_args: &[CoreClrArgs]) -> CoreClrProfileProps
     #[allow(clippy::needless_update)]
     CoreClrProfileProps {
         enabled: coreclr_args.contains(&CoreClrArgs::Enabled),
-        #[cfg(target_os = "windows")]
         gc_markers: coreclr_args.contains(&CoreClrArgs::GcMarkers),
-        #[cfg(target_os = "windows")]
         gc_suspensions: coreclr_args.contains(&CoreClrArgs::GcSuspendedThreads),
-        #[cfg(target_os = "windows")]
         gc_detailed_allocs: coreclr_args.contains(&CoreClrArgs::GcDetailedAllocs),
-        #[cfg(target_os = "windows")]
         event_stacks: coreclr_args.contains(&CoreClrArgs::EventStacks),
         ..Default::default()
     }
