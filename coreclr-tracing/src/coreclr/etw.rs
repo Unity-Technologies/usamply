@@ -308,6 +308,33 @@ impl CoreClrEtwConverter {
                 }
             }
             ("CLRRuntimeInformation", _) => None,
+            ("Type", "BulkType") => {
+                //         <template tid="BulkType">
+                // <data name="Count" inType="win:UInt32"    />
+                // <data name="ClrInstanceID" inType="win:UInt16" />
+                // <struct name="Values" count="Count" >
+                // <data name="TypeID" inType="win:UInt64" outType="win:HexInt64" />
+                // <data name="ModuleID" inType="win:UInt64" outType="win:HexInt64" />
+                // <data name="TypeNameID" inType="win:UInt32" />
+                // <data name="Flags" inType="win:UInt32" map="TypeFlagsMap"/>
+                // <data name="CorElementType"  inType="win:UInt8" />
+                // <data name="Name" inType="win:UnicodeString" />
+                // <data name="TypeParameterCount" inType="win:UInt32" />
+                // <data name="TypeParameters"  count="TypeParameterCount"  inType="win:UInt64" outType="win:HexInt64" />
+                // </struct>
+                // <UserData>
+                // <Type xmlns="myNs">
+                // <Count> %1 </Count>
+                // <ClrInstanceID> %2 </ClrInstanceID>
+                // </Type>
+                // </UserData>
+                //let count: u32 = parser.parse("Count");
+
+                // uint32 + uint16 at the front (Count and ClrInstanceID), then struct of values. We don't need a Vec<u8> copy.
+                //let values: Vec<u8> = parser.parse("Values");
+                //let values = &s.user_buffer()[6..];
+                None
+            },
             _ => None,
         };
 

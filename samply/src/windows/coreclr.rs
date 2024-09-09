@@ -1,18 +1,8 @@
 use bitflags::bitflags;
-use std::{collections::HashMap, convert::TryInto, fmt::Display};
 
 use coreclr_tracing::{CoreClrEvent, EventMetadata, GcReason, GcSuspendEeReason, GcType};
-use fxprof_processed_profile::*;
-use num_traits::FromPrimitive;
-
-use etw_reader::{self, schema::TypedEvent};
-use etw_reader::{
-    event_properties_to_string,
-    parser::{Parser, TryParse},
-};
 
 use crate::shared::coreclr::*;
-use crate::shared::process_sample_data::SimpleMarker;
 
 use crate::windows::profile_context::{KnownCategory, ProfileContext};
 
@@ -20,56 +10,13 @@ use super::elevated_helper::ElevatedRecordingProps;
 
 pub struct CoreClrContext {
     pub props: CoreClrProviderProps,
-    pub unknown_event_markers: bool,
-
-    last_marker_on_thread: HashMap<u32, (ThreadHandle, MarkerHandle)>,
-    gc_markers_on_thread: HashMap<u32, HashMap<&'static str, SavedMarkerInfo>>,
-
-    pub last_n: String,
 }
 
 impl CoreClrContext {
     pub fn new(context: &ProfileContext) -> Self {
         Self {
             props: context.creation_props().coreclr.to_provider_props(),
-            unknown_event_markers: context.creation_props().unknown_event_markers,
-
-            last_marker_on_thread: HashMap::new(),
-            gc_markers_on_thread: HashMap::new(),
-            last_n: String::new(),
         }
-    }
-
-    fn remove_last_event_for_thread(&mut self, tid: u32) -> Option<(ThreadHandle, MarkerHandle)> {
-        self.last_marker_on_thread.remove(&tid)
-    }
-
-    fn set_last_event_for_thread(&mut self, tid: u32, thread_marker: (ThreadHandle, MarkerHandle)) {
-        self.last_marker_on_thread.insert(tid, thread_marker);
-    }
-
-    fn save_gc_marker(
-        &mut self,
-        tid: u32,
-        start_timestamp_raw: u64,
-        event: &'static str,
-        name: String,
-        description: String,
-    ) {
-        self.gc_markers_on_thread.entry(tid).or_default().insert(
-            event,
-            SavedMarkerInfo {
-                start_timestamp_raw,
-                name,
-                description,
-            },
-        );
-    }
-
-    fn remove_gc_marker(&mut self, tid: u32, event: &str) -> Option<SavedMarkerInfo> {
-        self.gc_markers_on_thread
-            .get_mut(&tid)
-            .and_then(|m| m.remove(event))
     }
 }
 
@@ -104,18 +51,6 @@ bitflags! {
         const QuickJitForLoops = 0x2;
         const TieredPGO = 0x4;
         const ReadyToRun = 0x8;
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DisplayUnknownIfNone<'a, T>(pub &'a Option<T>);
-
-impl<'a, T: Display> Display for DisplayUnknownIfNone<'a, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            Some(value) => value.fmt(f),
-            None => f.write_str("Unknown"),
-        }
     }
 }
 
@@ -168,25 +103,24 @@ pub fn handle_coreclr_tracing_event(
         CoreClrEvent::MethodUnload(_e) => {
             // don't care
         }
-        CoreClrEvent::GcTriggered(e) if is_in_time_range && gc_markers => {
+        CoreClrEvent::GcTriggered(_e) if is_in_time_range && gc_markers => {
             let category = context.known_category(KnownCategory::CoreClrGc);
-            let mh = context.add_thread_instant_marker(
+            let _ = context.add_thread_instant_marker(
                 event_meta.timestamp,
                 event_meta.thread_id,
                 CoreClrGcMarker(category));
-            coreclr_context.set_last_event_for_thread(event_meta.thread_id, mh);
         }
         CoreClrEvent::GcAllocationTick(e) if is_in_time_range && gc_allocs => {}
         CoreClrEvent::GcSampledObjectAllocation(e) if is_in_time_range && gc_allocs => {
             let type_name_str = context.intern_profile_string(&format!("type{}", e.type_id));
             let category = context.known_category(KnownCategory::CoreClrGc);
-            let mh = context.add_thread_instant_marker(
+            let _ = context.add_thread_instant_marker(
                 event_meta.timestamp,
                 event_meta.thread_id,
                 CoreClrGcAllocMarker(type_name_str, e.total_size_for_type_sample as usize, category));
-            coreclr_context.set_last_event_for_thread(event_meta.thread_id, mh);
         }
-        CoreClrEvent::GcStart(e) if is_in_time_range && gc_markers => {
+        CoreClrEvent::GcStart(_e) if is_in_time_range && gc_markers => {
+            // TODO: save this start marker, and emit a range when we get a GcEnd
             // TODO: save this as a CoreClrGcDetailedMarker, instead of putting
             // the types, reason, GC# and generation into a string
             /*
@@ -204,7 +138,7 @@ pub fn handle_coreclr_tracing_event(
             );
             */
         }
-        CoreClrEvent::GcEnd(e) if is_in_time_range && gc_markers => {
+        CoreClrEvent::GcEnd(_e) if is_in_time_range && gc_markers => {
             /*
             if let Some(info) = coreclr_context.remove_gc_marker(event_meta.thread_id, "GC") {
                 context.add_thread_interval_marker(
