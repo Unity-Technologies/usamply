@@ -105,19 +105,36 @@ pub fn handle_coreclr_tracing_event(
         }
         CoreClrEvent::GcTriggered(_e) if is_in_time_range && gc_markers => {
             let category = context.known_category(KnownCategory::CoreClrGc);
-            let _ = context.add_thread_instant_marker(
+            let m = context.add_thread_instant_marker(
                 event_meta.timestamp,
                 event_meta.thread_id,
                 CoreClrGcMarker(category));
+            if let Some(stack) = event_meta.stack.as_ref() {
+                context.handle_coreclr_stack(event_meta.timestamp, event_meta.process_id, stack.iter().map(|v| *v), m);
+            }
         }
-        CoreClrEvent::GcAllocationTick(e) if is_in_time_range && gc_allocs => {}
+        CoreClrEvent::GcAllocationTick(e) if is_in_time_range && gc_allocs => {
+            let type_name_str = context.intern_profile_string(&e.type_name);
+            let category = context.known_category(KnownCategory::CoreClrGc);
+            let amount = if e.allocation_amount64 != 0 { e.allocation_amount64 as usize } else { e.allocation_amount as usize };
+            let m = context.add_thread_instant_marker(
+                event_meta.timestamp,
+                event_meta.thread_id,
+                CoreClrGcAllocTickMarker(type_name_str, amount, category));
+            if let Some(stack) = event_meta.stack.as_ref() {
+                context.handle_coreclr_stack(event_meta.timestamp, event_meta.process_id, stack.iter().map(|v| *v), m);
+            }
+        }
         CoreClrEvent::GcSampledObjectAllocation(e) if is_in_time_range && gc_allocs => {
             let type_name_str = context.intern_profile_string(&format!("type{}", e.type_id));
             let category = context.known_category(KnownCategory::CoreClrGc);
-            let _ = context.add_thread_instant_marker(
+            let m = context.add_thread_instant_marker(
                 event_meta.timestamp,
                 event_meta.thread_id,
                 CoreClrGcAllocMarker(type_name_str, e.total_size_for_type_sample as usize, category));
+            if let Some(stack) = event_meta.stack.as_ref() {
+                context.handle_coreclr_stack(event_meta.timestamp, event_meta.process_id, stack.iter().map(|v| *v), m);
+            }
         }
         CoreClrEvent::GcStart(_e) if is_in_time_range && gc_markers => {
             // TODO: save this start marker, and emit a range when we get a GcEnd

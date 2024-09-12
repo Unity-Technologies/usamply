@@ -9,12 +9,14 @@ use etw_reader::parser::{Parser, TryParse};
 
 pub struct CoreClrEtwConverter {
     last_event_on_thread: HashMap<u32, (EventMetadata, CoreClrEvent)>,
+    //last_event: String,
 }
 
 impl CoreClrEtwConverter {
     pub fn new() -> Self {
         Self {
             last_event_on_thread: HashMap::new(),
+            //last_event: String::default(),
         }
     }
 
@@ -44,6 +46,9 @@ impl CoreClrEtwConverter {
             }
         };
 
+        //let xx = format!("{} {} {}", provider, task, opcode);
+        //if xx != self.last_event { eprintln!("{} @ {}", xx, s.thread_id()); self.last_event = xx; }
+
         // When working with merged ETL files, the proper task and opcode names appear here, e.g. "CLRMethod/MethodLoadVerbose" or
         // "CLRMethodRundown/MethodDCStartVerbose". When working with the unmerged user ETL, these show up as e.g. "Method /DCStartVerbose".
         // Not clear where those names come from the Etw .man file in CoreCLR does have entries for e.g. RuntimePublisher.MethodDCStartVerboseOpcodeMessage
@@ -51,58 +56,56 @@ impl CoreClrEtwConverter {
         // ETL shows the same (correct) names as the merged ETL.
         //
         // We try to hack around this by converting the unmerged name to the converted one here.
-        if task.ends_with(' ') || opcode.ends_with(' ') {
-            task = task.trim();
-            opcode = opcode.trim();
+        task = task.trim();
+        opcode = opcode.trim();
 
-            // Some of these are technically not correct; e.g. the task should be CLRMethodRundown if it's the
-            // rundown provider, but we handle them the same below.
-            match task {
-                "Method" => {
-                    task = "CLRMethod";
-                    opcode = match opcode {
-                        "LoadVerbose" => "MethodLoadVerbose",
-                        "UnloadVerbose" => "MethodUnloadVerbose",
-                        "DCStartVerbose" => "MethodDCStartVerbose",
-                        "DCEndVerbose" => "MethodDCEndVerbose",
-                        "JittingStarted" => "MethodJittingStarted",
-                        _ => opcode.trim(),
-                    };
-                },
-                "Loader" => {
-                    task = "CLRLoader";
-                    opcode = match opcode {
-                        "ModuleDCStart" => "ModuleDCStart",
-                        _ => opcode.trim(),
-                    };
-                },
-                "Runtime" => {
-                    task = "CLRRuntimeInformation";
-                    opcode = opcode.trim();
-                },
-                "GC" => {
-                    task = "GarbageCollection";
-                    opcode = match opcode {
-                        "PerHeapHisory" => opcode,
-                        "GCDynamicEvent" => opcode,
-                        "Start" => "win:Start",
-                        "Stop" => "win:Stop",
-                        "RestartEEStart" => "GCRestartEEBegin",
-                        "RestartEEStop" => "GCRestartEEEnd",
-                        "SuspendEEStart" => "GCSuspendEEBegin",
-                        "SuspendEEStop" => "GCSuspendEEEnd",
-                        _ => opcode.trim(),
-                    };
-                },
-                "ClrStack" => {
-                    task = "CLRStack";
-                    opcode = match opcode {
-                        "Walk" => "CLRStackWalk",
-                        _ => opcode.trim(),
-                    };
-                },
-                _ => {},
-            }
+        // Some of these are technically not correct; e.g. the task should be CLRMethodRundown if it's the
+        // rundown provider, but we handle them the same below.
+        match task {
+            "Method" => {
+                task = "CLRMethod";
+                opcode = match opcode {
+                    "LoadVerbose" => "MethodLoadVerbose",
+                    "UnloadVerbose" => "MethodUnloadVerbose",
+                    "DCStartVerbose" => "MethodDCStartVerbose",
+                    "DCEndVerbose" => "MethodDCEndVerbose",
+                    "JittingStarted" => "MethodJittingStarted",
+                    _ => opcode,
+                };
+            },
+            "Loader" => {
+                task = "CLRLoader";
+                opcode = match opcode {
+                    "ModuleDCStart" => "ModuleDCStart",
+                    _ => opcode,
+                };
+            },
+            "Runtime" => {
+                task = "CLRRuntimeInformation";
+                opcode = opcode.trim();
+            },
+            "GC" => {
+                task = "GarbageCollection";
+                opcode = match opcode {
+                    "PerHeapHisory" => opcode,
+                    "GCDynamicEvent" => opcode,
+                    "Start" => "win:Start",
+                    "Stop" => "win:Stop",
+                    "RestartEEStart" => "GCRestartEEBegin",
+                    "RestartEEStop" => "GCRestartEEEnd",
+                    "SuspendEEStart" => "GCSuspendEEBegin",
+                    "SuspendEEStop" => "GCSuspendEEEnd",
+                    _ => opcode,
+                };
+            },
+            "ClrStack" => {
+                task = "CLRStack";
+                opcode = match opcode {
+                    "Walk" => "CLRStackWalk",
+                    _ => opcode,
+                };
+            },
+            _ => {},
         }
 
         let pid = s.process_id();
@@ -129,6 +132,7 @@ impl CoreClrEtwConverter {
 
             // if we don't have anything to attach this stack to, just skip it
             if pending_event.is_none() {
+                //eprintln!("no pending event for stackwalk {}", tid);
                 return None;
             }
 
@@ -196,21 +200,28 @@ impl CoreClrEtwConverter {
                     "GCSampledObjectAllocation" => {
                         // If High/Low flags are set, then we get one of these for every alloc. Otherwise only
                         // when a threshold is hit. (100kb) The count and size are aggregates in that case.
-                        let type_id: u64 = parser.parse("TypeID"); // TODO: convert to str, with bulk type data
-                        let address: u64 = parser.parse("Address");
-                        let object_count_for_type_sample: u32 = parser.parse("ObjectCountForTypeSample");
-                        let total_size_for_type_sample: u64 = parser.parse("TotalSizeForTypeSample");
-                        let clr_instance_id: u16 = parser.parse("ClrInstanceID");
 
-                        Some(CoreClrEvent::GcSampledObjectAllocation(
-                            GcSampledObjectAllocationEvent {
-                                address,
-                                type_id,
-                                object_count_for_type_sample,
-                                total_size_for_type_sample,
-                                clr_instance_id,
-                            },
-                        ))
+                        // There's a bug here in some windows processes, where TypeID is sent as a 32-bit value
+                        // even in a 64-bit process. This commonly occurs with powershell.exe. Just ignore
+                        // these events for now.
+                        if let Some(type_id) = parser.try_parse("TypeID").ok() {
+                            let address: u64 = parser.parse("Address");
+                            let object_count_for_type_sample: u32 = parser.parse("ObjectCountForTypeSample");
+                            let total_size_for_type_sample: u64 = parser.parse("TotalSizeForTypeSample");
+                            let clr_instance_id: u16 = parser.parse("ClrInstanceID");
+
+                            Some(CoreClrEvent::GcSampledObjectAllocation(
+                                GcSampledObjectAllocationEvent {
+                                    address,
+                                    type_id,
+                                    object_count_for_type_sample,
+                                    total_size_for_type_sample,
+                                    clr_instance_id,
+                                },
+                            ))
+                        } else {
+                            None
+                        }
                     }
                     "Triggered" => {
                         let reason: u32 = parser.parse("Reason");

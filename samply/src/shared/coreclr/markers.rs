@@ -5,7 +5,7 @@ use fxprof_processed_profile::{
 
 // String is type name
 #[derive(Debug, Clone)]
-pub struct CoreClrGcAllocTickMarker(pub StringHandle, pub usize, pub usize, pub CategoryHandle);
+pub struct CoreClrGcAllocTickMarker(pub StringHandle, pub usize, pub CategoryHandle);
 
 impl StaticSchemaMarker for CoreClrGcAllocTickMarker {
     const UNIQUE_MARKER_TYPE_NAME: &'static str = "GC Alloc Tick";
@@ -29,15 +29,9 @@ impl StaticSchemaMarker for CoreClrGcAllocTickMarker {
                     searchable: true,
                 },
                 MarkerFieldSchema {
-                    key: "size".into(),
-                    label: "Total size of all objects".into(),
+                    key: "amount".into(),
+                    label: "Size".into(),
                     format: MarkerFieldFormat::Bytes,
-                    searchable: false,
-                },
-                MarkerFieldSchema {
-                    key: "objcount".into(),
-                    label: "Number of objects allocated".into(),
-                    format: MarkerFieldFormat::Integer,
                     searchable: false,
                 },
             ],
@@ -54,7 +48,7 @@ impl StaticSchemaMarker for CoreClrGcAllocTickMarker {
     }
 
     fn category(&self, _profile: &mut Profile) -> CategoryHandle {
-        self.3
+        self.2
     }
 
     fn string_field_value(&self, _field_index: u32) -> StringHandle {
@@ -64,8 +58,6 @@ impl StaticSchemaMarker for CoreClrGcAllocTickMarker {
     fn number_field_value(&self, field_index: u32) -> f64 {
         if field_index == 1 {
             self.1 as f64
-        } else if field_index == 2 {
-            self.2 as f64
         } else {
             panic!("Unexpected field_index");
         }
