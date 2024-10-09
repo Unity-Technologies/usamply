@@ -22,9 +22,6 @@ use crate::{CategoryHandle, Marker, MarkerHandle, MarkerTiming, MarkerTypeHandle
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct ProcessHandle(pub(crate) usize);
 
-#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct CounterHandle(pub(crate) usize);
-
 #[derive(Debug)]
 pub struct Thread {
     process: ProcessHandle,
@@ -79,6 +76,10 @@ impl Thread {
 
     pub fn set_end_time(&mut self, end_time: Timestamp) {
         self.end_time = Some(end_time);
+    }
+
+    pub fn set_tid(&mut self, tid: String) {
+        self.tid = tid;
     }
 
     pub fn process(&self) -> ProcessHandle {
