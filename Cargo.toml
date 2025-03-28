@@ -33,6 +33,10 @@ install-updater = false
 # Don't build benchmarks and other unneeded crates
 precise-builds = true
 
+[workspace.metadata.dist.github-custom-runners]
+aarch64-apple-darwin = "macos-13-xlarge"
+x86_64-apple-darwin = "macos-13"
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
