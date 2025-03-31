@@ -209,9 +209,15 @@ async fn start_server(
     }
     eprintln!("Press Ctrl+C to stop.");
 
+    eprintln!("opening browser?");
     if server_props.open_in_browser {
+        eprintln!("yes");
         if let Some(profiler_url) = &profiler_url {
-            let _ = opener::open_browser(profiler_url);
+            eprintln!("definitely");
+            match webbrowser::open(profiler_url) {
+                Ok(_) => println!("Opened browser at {}", profiler_url),
+                Err(e) => eprintln!("Failed to open browser: {}", e),
+            }
         }
     }
 
