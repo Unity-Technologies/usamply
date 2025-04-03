@@ -150,6 +150,8 @@ use samply_symbols::{FileAndPathHelper, SymbolManager};
 use serde_json::json;
 use source::SourceApi;
 use symbolicate::SymbolicateApi;
+use std::thread;
+use std::time::Duration;
 
 mod api_file_path;
 mod asm;
@@ -209,7 +211,18 @@ impl<'a, H: FileAndPathHelper> Api<'a, H> {
 
             println!("SAMPLY_AUTO_UPLOAD_REPLY: {}", request_json_data);
             let _ = std::io::stdout().flush();
-            std::process::exit(0);
+
+            // don't exit instantly because that can actually cause the upload to fail
+            thread::spawn(|| {
+                // Wait for 5 seconds
+                let wait_duration = Duration::new(5, 0);
+                thread::sleep(wait_duration);
+
+                println!("Exiting now...");
+                std::process::exit(0);
+            });
+
+            json!({ "success": format!("{request_url}") }).to_string()
         } else {
             json!({ "error": format!("Unrecognized URL {request_url}") }).to_string()
         }
