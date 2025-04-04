@@ -213,7 +213,9 @@ async fn start_server(
     }
     eprintln!("Press Ctrl+C to stop.");
 
+    eprintln!("opening browser?");
     if server_props.open_in_browser {
+        eprintln!("yes");
         if let Some(profiler_url) = &profiler_url {
             let _ = my_open_browser(profiler_url);
         }
