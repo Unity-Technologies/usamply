@@ -31,13 +31,6 @@ use std::error::Error;
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, io};
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-use crate::linux as sys;
-#[cfg(target_os = "macos")]
-use crate::macos as sys;
-#[cfg(target_os = "windows")]
-use crate::windows as sys;
-
 #[derive(Clone, Debug)]
 pub struct ServerProps {
     pub address: IpAddr,
