@@ -27,6 +27,17 @@ use crate::shared;
 use crate::shared::ctrl_c::CtrlC;
 use crate::shared::symbol_props::SymbolProps;
 
+use std::error::Error;
+use std::process::{Command, ExitStatus, Stdio};
+use std::{env, io};
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+use crate::linux as sys;
+#[cfg(target_os = "macos")]
+use crate::macos as sys;
+#[cfg(target_os = "windows")]
+use crate::windows as sys;
+
 #[derive(Clone, Debug)]
 pub struct ServerProps {
     pub address: IpAddr,
@@ -211,13 +222,50 @@ async fn start_server(
 
     if server_props.open_in_browser {
         if let Some(profiler_url) = &profiler_url {
-            let _ = opener::open_browser(profiler_url);
+            let _ = my_open_browser(profiler_url);
         }
     }
 
     // Run this server until it stops.
     if let Err(e) = server.await {
         eprintln!("server error: {e}");
+    }
+}
+
+pub fn my_open_browser<P>(path: P)
+where
+    P: AsRef<OsStr>,
+{
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        eprintln!("my_open_browser");
+        let mut path = path.as_ref();
+        if let Ok(browser_var) = env::var("BROWSER") {
+            eprintln!("BROWSER is {browser_var}");
+            Command::new(&browser_var)
+                .arg(path)
+                .spawn()
+                .expect("browser command failed to start");
+        } else {
+            let _ = opener::open_browser(path);
+        }
+    }
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        eprintln!("my_open_browser");
+        let mut path = path.as_ref();
+        if let Ok(browser_var) = env::var("BROWSER") {
+            eprintln!("BROWSER is {browser_var}");
+            Command::new(&browser_var)
+                .arg(path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("browser command failed to start");
+        } else {
+            let _ = opener::open_browser(path);
+        }
     }
 }
 
