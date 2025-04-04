@@ -156,7 +156,7 @@ async fn start_server(
             // At some point a real URL
             //None => "https://profiler.cds.internal.unity3d.com",
             //None => "https://profiler-dot-unity-eng-arch-dev.uw.r.appspot.com/",
-            None => " https://rnd-performance-profopt-samply-server.cds.internal.unity3d.com/",
+            None => " https://rnd-performance-profopt-samply-server.cds.internal.unity3d.com",
         };
 
         let encoded_profile_url = utf8_percent_encode(&profile_url, BAD_CHARS).to_string();
@@ -217,6 +217,17 @@ async fn start_server(
     if server_props.open_in_browser {
         eprintln!("yes");
         if let Some(profiler_url) = &profiler_url {
+            println!("Starting the profiler at {profiler_url}");
+#[cfg(any(target_os = "macos"))]
+            {
+                if webbrowser::open_browser(webbrowser::Browser::Firefox, profiler_url).is_ok() {
+                    println!("Started the profiler");
+                } else {
+                    eprintln!("Error starting the browser");
+                }
+            }
+
+#[cfg(not(any(target_os = "macos")))]
             let _ = my_open_browser(profiler_url);
         }
     }
@@ -233,10 +244,10 @@ where
 {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        eprintln!("my_open_browser");
+        println!("my_open_browser");
         let mut path = path.as_ref();
         if let Ok(browser_var) = env::var("BROWSER") {
-            eprintln!("BROWSER is {browser_var}");
+            println!("BROWSER is {browser_var}");
             Command::new(&browser_var)
                 .arg(path)
                 .spawn()
@@ -246,12 +257,12 @@ where
         }
     }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows"))]
     {
-        eprintln!("my_open_browser");
+        println!("my_open_browser");
         let mut path = path.as_ref();
         if let Ok(browser_var) = env::var("BROWSER") {
-            eprintln!("BROWSER is {browser_var}");
+            println!("BROWSER is {browser_var}");
             Command::new(&browser_var)
                 .arg(path)
                 .stdout(Stdio::piped())
