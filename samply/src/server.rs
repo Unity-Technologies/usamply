@@ -213,9 +213,8 @@ async fn start_server(
     }
     eprintln!("Press Ctrl+C to stop.");
 
-    eprintln!("opening browser?");
+    eprintln!("Opening browser?");
     if server_props.open_in_browser {
-        eprintln!("yes");
         if let Some(profiler_url) = &profiler_url {
             println!("Starting the profiler at {profiler_url}");
 #[cfg(any(target_os = "macos"))]
@@ -247,7 +246,7 @@ where
         println!("my_open_browser");
         let mut path = path.as_ref();
         if let Ok(browser_var) = env::var("BROWSER") {
-            println!("BROWSER is {browser_var}");
+            println!("BROWSER environment variable is {browser_var}");
             Command::new(&browser_var)
                 .arg(path)
                 .spawn()
@@ -262,7 +261,7 @@ where
         println!("my_open_browser");
         let mut path = path.as_ref();
         if let Ok(browser_var) = env::var("BROWSER") {
-            println!("BROWSER is {browser_var}");
+            println!("BROWSER environment variable is {browser_var}");
             Command::new(&browser_var)
                 .arg(path)
                 .stdout(Stdio::piped())

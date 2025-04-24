@@ -1,13 +1,14 @@
-# samply
+# usamply
 
 samply is a command line CPU profiler which uses the [Firefox profiler](https://profiler.firefox.com/) as its UI.
+usamply is a Unity fork of samply.
 
-samply works on macOS and Linux. Windows support is planned.
+usamply works on Windows, macOS and Linux.
 
 In order to profile the execution of `./my-application`, prepend `samply record` to the command invocation:
 
 ```sh
-samply record ./my-application my-arguments
+usamply record ./my-application my-arguments
 ```
 
 On Linux, samply uses perf events. You can grant temporary access by running:
@@ -35,16 +36,16 @@ cargo install --locked samply
 ### Build from source
 
 ```sh
-git clone https://github.com/mstange/samply
-cd samply
+git clone git@github.com:Unity-Technologies/usamply.git
+cd usamply
 cargo build --release
-./target/release/samply ...
+./target/release/usamply ...
 ```
 
 ## Description
 
 ```sh
-samply record ./my-application my-arguments
+usamply record ./my-application my-arguments
 ```
 
 This spawns `./my-application my-arguments` in a subprocess and records a profile of its execution. When the command finishes, samply opens
@@ -57,7 +58,7 @@ Here's an example: https://share.firefox.dev/3j3PJoK
 This is a profile of [dump_syms](https://github.com/mozilla/dump_syms), running on macOS, recorded as follows:
 
 ```
-samply record ./dump_syms ~/mold-opt-libxul.so > /dev/null
+usamply record ./dump_syms ~/mold-opt-libxul.so > /dev/null
 ```
 
 You can see which functions were running for how long. You can see flame graphs and timelines. You can double-click functions in the call tree to open the source view, and see which lines of code were sampled how many times.
