@@ -1,0 +1,394 @@
+{
+  "dist_version": "0.13.1",
+  "announcement_tag": "usamply/0.12.10",
+  "announcement_tag_is_implicit": false,
+  "announcement_is_prerelease": false,
+  "announcement_title": "usamply/0.12.10",
+  "announcement_github_body": "## Install usamply 0.12.10\n\n### Install prebuilt binaries via shell script\n\n```sh\ncurl --proto '=https' --tlsv1.2 -LsSf https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-installer.sh | sh\n```\n\n### Install prebuilt binaries via powershell script\n\n```sh\npowershell -c \"irm https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-installer.ps1 | iex\"\n```\n\n## Download usamply 0.12.10\n\n|  File  | Platform | Checksum |\n|--------|----------|----------|\n| [usamply-aarch64-apple-darwin.tar.xz](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-aarch64-apple-darwin.tar.xz) | Apple Silicon macOS | [checksum](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-aarch64-apple-darwin.tar.xz.sha256) |\n| [usamply-x86_64-apple-darwin.tar.xz](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-apple-darwin.tar.xz) | Intel macOS | [checksum](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-apple-darwin.tar.xz.sha256) |\n| [usamply-aarch64-pc-windows-msvc.zip](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-aarch64-pc-windows-msvc.zip) | ARM64 Windows | [checksum](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-aarch64-pc-windows-msvc.zip.sha256) |\n| [usamply-x86_64-pc-windows-msvc.zip](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-pc-windows-msvc.zip) | x64 Windows | [checksum](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-pc-windows-msvc.zip.sha256) |\n| [usamply-x86_64-unknown-linux-gnu.tar.xz](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-unknown-linux-gnu.tar.xz) | x64 Linux | [checksum](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-unknown-linux-gnu.tar.xz.sha256) |\n| [usamply-x86_64-unknown-linux-musl.tar.xz](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-unknown-linux-musl.tar.xz) | x64 MUSL Linux | [checksum](https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-x86_64-unknown-linux-musl.tar.xz.sha256) |\n\n",
+  "releases": [
+    {
+      "app_name": "usamply",
+      "app_version": "0.12.10",
+      "artifacts": [
+        "source.tar.gz",
+        "source.tar.gz.sha256",
+        "usamply-installer.sh",
+        "usamply-installer.ps1",
+        "usamply-aarch64-apple-darwin.tar.xz",
+        "usamply-aarch64-apple-darwin.tar.xz.sha256",
+        "usamply-aarch64-pc-windows-msvc.zip",
+        "usamply-aarch64-pc-windows-msvc.zip.sha256",
+        "usamply-x86_64-apple-darwin.tar.xz",
+        "usamply-x86_64-apple-darwin.tar.xz.sha256",
+        "usamply-x86_64-pc-windows-msvc.zip",
+        "usamply-x86_64-pc-windows-msvc.zip.sha256",
+        "usamply-x86_64-unknown-linux-gnu.tar.xz",
+        "usamply-x86_64-unknown-linux-gnu.tar.xz.sha256",
+        "usamply-x86_64-unknown-linux-musl.tar.xz",
+        "usamply-x86_64-unknown-linux-musl.tar.xz.sha256"
+      ],
+      "hosting": {
+        "github": {
+          "artifact_download_url": "https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10"
+        }
+      }
+    }
+  ],
+  "artifacts": {
+    "source.tar.gz": {
+      "name": "source.tar.gz",
+      "kind": "source-tarball",
+      "checksum": "source.tar.gz.sha256"
+    },
+    "source.tar.gz.sha256": {
+      "name": "source.tar.gz.sha256",
+      "kind": "checksum"
+    },
+    "usamply-aarch64-apple-darwin.tar.xz": {
+      "name": "usamply-aarch64-apple-darwin.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "aarch64-apple-darwin"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE-APACHE",
+          "path": "LICENSE-APACHE",
+          "kind": "license"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "path": "LICENSE-MIT",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "RELEASES.md",
+          "path": "RELEASES.md",
+          "kind": "changelog"
+        },
+        {
+          "id": "usamply-aarch64-apple-darwin-usamply",
+          "name": "usamply",
+          "path": "usamply",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "usamply-aarch64-apple-darwin.tar.xz.sha256"
+    },
+    "usamply-aarch64-apple-darwin.tar.xz.sha256": {
+      "name": "usamply-aarch64-apple-darwin.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "aarch64-apple-darwin"
+      ]
+    },
+    "usamply-aarch64-pc-windows-msvc.zip": {
+      "name": "usamply-aarch64-pc-windows-msvc.zip",
+      "kind": "executable-zip",
+      "target_triples": [
+        "aarch64-pc-windows-msvc"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE-APACHE",
+          "path": "LICENSE-APACHE",
+          "kind": "license"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "path": "LICENSE-MIT",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "RELEASES.md",
+          "path": "RELEASES.md",
+          "kind": "changelog"
+        },
+        {
+          "id": "usamply-aarch64-pc-windows-msvc-usamply",
+          "name": "usamply",
+          "path": "usamply.exe",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "usamply-aarch64-pc-windows-msvc.zip.sha256"
+    },
+    "usamply-aarch64-pc-windows-msvc.zip.sha256": {
+      "name": "usamply-aarch64-pc-windows-msvc.zip.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "aarch64-pc-windows-msvc"
+      ]
+    },
+    "usamply-installer.ps1": {
+      "name": "usamply-installer.ps1",
+      "kind": "installer",
+      "target_triples": [
+        "aarch64-pc-windows-msvc",
+        "x86_64-pc-windows-msvc"
+      ],
+      "install_hint": "powershell -c \"irm https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-installer.ps1 | iex\"",
+      "description": "Install prebuilt binaries via powershell script"
+    },
+    "usamply-installer.sh": {
+      "name": "usamply-installer.sh",
+      "kind": "installer",
+      "target_triples": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl"
+      ],
+      "install_hint": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Unity-Technologies/usamply/releases/download/usamply/0.12.10/usamply-installer.sh | sh",
+      "description": "Install prebuilt binaries via shell script"
+    },
+    "usamply-x86_64-apple-darwin.tar.xz": {
+      "name": "usamply-x86_64-apple-darwin.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "x86_64-apple-darwin"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE-APACHE",
+          "path": "LICENSE-APACHE",
+          "kind": "license"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "path": "LICENSE-MIT",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "RELEASES.md",
+          "path": "RELEASES.md",
+          "kind": "changelog"
+        },
+        {
+          "id": "usamply-x86_64-apple-darwin-usamply",
+          "name": "usamply",
+          "path": "usamply",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "usamply-x86_64-apple-darwin.tar.xz.sha256"
+    },
+    "usamply-x86_64-apple-darwin.tar.xz.sha256": {
+      "name": "usamply-x86_64-apple-darwin.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "x86_64-apple-darwin"
+      ]
+    },
+    "usamply-x86_64-pc-windows-msvc.zip": {
+      "name": "usamply-x86_64-pc-windows-msvc.zip",
+      "kind": "executable-zip",
+      "target_triples": [
+        "x86_64-pc-windows-msvc"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE-APACHE",
+          "path": "LICENSE-APACHE",
+          "kind": "license"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "path": "LICENSE-MIT",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "RELEASES.md",
+          "path": "RELEASES.md",
+          "kind": "changelog"
+        },
+        {
+          "id": "usamply-x86_64-pc-windows-msvc-usamply",
+          "name": "usamply",
+          "path": "usamply.exe",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "usamply-x86_64-pc-windows-msvc.zip.sha256"
+    },
+    "usamply-x86_64-pc-windows-msvc.zip.sha256": {
+      "name": "usamply-x86_64-pc-windows-msvc.zip.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "x86_64-pc-windows-msvc"
+      ]
+    },
+    "usamply-x86_64-unknown-linux-gnu.tar.xz": {
+      "name": "usamply-x86_64-unknown-linux-gnu.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE-APACHE",
+          "path": "LICENSE-APACHE",
+          "kind": "license"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "path": "LICENSE-MIT",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "RELEASES.md",
+          "path": "RELEASES.md",
+          "kind": "changelog"
+        },
+        {
+          "id": "usamply-x86_64-unknown-linux-gnu-usamply",
+          "name": "usamply",
+          "path": "usamply",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "usamply-x86_64-unknown-linux-gnu.tar.xz.sha256"
+    },
+    "usamply-x86_64-unknown-linux-gnu.tar.xz.sha256": {
+      "name": "usamply-x86_64-unknown-linux-gnu.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "usamply-x86_64-unknown-linux-musl.tar.xz": {
+      "name": "usamply-x86_64-unknown-linux-musl.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "x86_64-unknown-linux-musl"
+      ],
+      "assets": [
+        {
+          "name": "LICENSE-APACHE",
+          "path": "LICENSE-APACHE",
+          "kind": "license"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "path": "LICENSE-MIT",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "RELEASES.md",
+          "path": "RELEASES.md",
+          "kind": "changelog"
+        },
+        {
+          "id": "usamply-x86_64-unknown-linux-musl-usamply",
+          "name": "usamply",
+          "path": "usamply",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "usamply-x86_64-unknown-linux-musl.tar.xz.sha256"
+    },
+    "usamply-x86_64-unknown-linux-musl.tar.xz.sha256": {
+      "name": "usamply-x86_64-unknown-linux-musl.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "x86_64-unknown-linux-musl"
+      ]
+    }
+  },
+  "systems": {
+    "host:create:all:": {
+      "id": "host:create:all:",
+      "cargo_version_line": "cargo 1.86.0 (adf9b6ad1 2025-02-28)"
+    }
+  },
+  "publish_prereleases": false,
+  "ci": {
+    "github": {
+      "artifacts_matrix": {
+        "include": [
+          {
+            "targets": [
+              "aarch64-apple-darwin"
+            ],
+            "runner": "macos-13-xlarge",
+            "install_dist": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.13.1/cargo-dist-installer.sh | sh",
+            "dist_args": "--artifacts=local --target=aarch64-apple-darwin"
+          },
+          {
+            "targets": [
+              "aarch64-pc-windows-msvc"
+            ],
+            "runner": "windows-2019",
+            "install_dist": "powershell -c \"irm https://github.com/axodotdev/cargo-dist/releases/download/v0.13.1/cargo-dist-installer.ps1 | iex\"",
+            "dist_args": "--artifacts=local --target=aarch64-pc-windows-msvc"
+          },
+          {
+            "targets": [
+              "x86_64-apple-darwin"
+            ],
+            "runner": "macos-13",
+            "install_dist": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.13.1/cargo-dist-installer.sh | sh",
+            "dist_args": "--artifacts=local --target=x86_64-apple-darwin"
+          },
+          {
+            "targets": [
+              "x86_64-pc-windows-msvc"
+            ],
+            "runner": "windows-2019",
+            "install_dist": "powershell -c \"irm https://github.com/axodotdev/cargo-dist/releases/download/v0.13.1/cargo-dist-installer.ps1 | iex\"",
+            "dist_args": "--artifacts=local --target=x86_64-pc-windows-msvc"
+          },
+          {
+            "targets": [
+              "x86_64-unknown-linux-gnu"
+            ],
+            "runner": "ubuntu-22.04",
+            "install_dist": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.13.1/cargo-dist-installer.sh | sh",
+            "dist_args": "--artifacts=local --target=x86_64-unknown-linux-gnu"
+          },
+          {
+            "targets": [
+              "x86_64-unknown-linux-musl"
+            ],
+            "runner": "ubuntu-22.04",
+            "install_dist": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.13.1/cargo-dist-installer.sh | sh",
+            "dist_args": "--artifacts=local --target=x86_64-unknown-linux-musl",
+            "packages_install": "sudo apt-get update && sudo apt-get install musl-tools"
+          }
+        ]
+      },
+      "pr_run_mode": "plan"
+    }
+  },
+  "linkage": []
+}
