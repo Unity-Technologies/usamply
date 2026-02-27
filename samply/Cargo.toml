@@ -1,12 +1,12 @@
 [package]
-name = "samply"
-version = "0.13.1-prerelease.3"
+name = "usamply"
+version = "0.13.1-prerelease.4"
 authors = ["Markus Stange <mstange@themasta.com>"]
 edition = "2021"
 rust-version = "1.84" # needed by samply-quota-manager -> rusqlite_migration
 license = "MIT OR Apache-2.0"
-description = "A command line profiler for macOS and Linux."
-repository = "https://github.com/mstange/samply/"
+description = "A command line profiler for macOS and Linux. (usamply customized from samply)."
+repository = "https://github.com/Unity-Technologies/usamply"
 readme = "README.md"
 
 [dependencies]
