@@ -18,10 +18,6 @@ members = [
 ]
 exclude = ["etw-reader"] # Should not be compiled on non-Windows
 
-[workspace.metadata.dist.github-custom-runners]
-aarch64-apple-darwin = "macos-14-xlarge"
-x86_64-apple-darwin = "macos-14"
-
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"

@@ -20,6 +20,11 @@ precise-builds = true
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 
+[dist.github-custom-runners.aarch64-apple-darwin]
+runner = "macos-14-xlarge"
+[dist.github-custom-runners.x86_64-apple-darwin]
+runner = "macos-14"
+
 # Use a container with an older glibc for maximum Linux version compat,
 # as described on https://github.com/astral-sh/cargo-dist/blob/main/book/src/ci/customizing.md
 [dist.github-custom-runners.x86_64-unknown-linux-gnu]
