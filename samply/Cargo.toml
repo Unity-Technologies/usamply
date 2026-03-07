@@ -1,6 +1,6 @@
 [package]
 name = "usamply"
-version = "0.13.3"
+version = "0.13.3-mac-fix"
 authors = ["Markus Stange <mstange@themasta.com>"]
 edition = "2021"
 rust-version = "1.84" # needed by samply-quota-manager -> rusqlite_migration
