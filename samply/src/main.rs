@@ -26,6 +26,9 @@ use std::sync::Arc;
 use fxprof_processed_profile::Profile;
 use shared::ctrl_c::CtrlC;
 
+use std::process::{Command, Stdio};
+use std::{env};
+
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use linux::profiler;
 #[cfg(target_os = "macos")]
@@ -275,7 +278,17 @@ fn run_server_serving_profile(
 
         if open_in_browser {
             if let Some(profiler_url) = &profiler_url {
-                let _ = opener::open_browser(profiler_url);
+                #[cfg(any(target_os = "macos"))]
+                {
+                    if webbrowser::open_browser(webbrowser::Browser::Firefox, profiler_url).is_ok() {
+                        println!("Started the profiler");
+                    } else {
+                        eprintln!("Error starting the browser");
+                    }
+                }
+
+#[cfg(not(any(target_os = "macos")))]
+                let _ = my_open_browser(profiler_url);
             }
         }
 
@@ -288,4 +301,41 @@ fn run_server_serving_profile(
             quota_manager.finish().await;
         }
     });
+}
+
+pub fn my_open_browser<P>(path: P)
+where
+    P: AsRef<OsStr>,
+{
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        println!("my_open_browser");
+        let mut path = path.as_ref();
+        if let Ok(browser_var) = env::var("BROWSER") {
+            println!("BROWSER is {browser_var}");
+            Command::new(&browser_var)
+                .arg(path)
+                .spawn()
+                .expect("browser command failed to start");
+        } else {
+            let _ = opener::open_browser(path);
+        }
+    }
+
+#[cfg(any(target_os = "windows"))]
+    {
+        println!("my_open_browser");
+        let path = path.as_ref();
+        if let Ok(browser_var) = env::var("BROWSER") {
+            println!("BROWSER is {browser_var}");
+            Command::new(&browser_var)
+                .arg(path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("browser command failed to start");
+        } else {
+            let _ = opener::open_browser(path);
+        }
+    }
 }
