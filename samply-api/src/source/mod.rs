@@ -1,5 +1,6 @@
 use samply_symbols::{
-    FileAndPathHelper, FileAndPathHelperError, LibraryInfo, LookupAddress, SymbolManager,
+    FileAndPathHelper, FileAndPathHelperError, LibraryInfo, LookupAddress, SourceFilePath,
+    SymbolManager,
 };
 
 use crate::api_file_path::to_api_file_path;
@@ -74,14 +75,24 @@ impl<'a, H: FileAndPathHelper> SourceApi<'a, H> {
             .into_iter()
             .filter_map(|frame| frame.file_path)
             .map(|path| symbol_map.resolve_source_file_path(path))
-            .find(|file_path| to_api_file_path(file_path) == *requested_file)
-            .ok_or(SourceError::InvalidPath)?;
+            .find(|file_path| to_api_file_path(file_path) == *requested_file);
 
         // If we got here, it means that the file access is allowed. Read the file.
-        let source = self
-            .symbol_manager
-            .load_source_file(&debug_file_location, &source_file_path)
-            .await?;
+        // If the lookup failed, try using the requested file path directly as a fallback.
+        let source = match source_file_path {
+            Some(path) => {
+                self.symbol_manager
+                    .load_source_file(&debug_file_location, &path)
+                    .await?
+            }
+            None => {
+                let fallback_path =
+                    SourceFilePath::RawPath(std::borrow::Cow::Borrowed(requested_file.as_str()));
+                self.symbol_manager
+                    .load_source_file(&debug_file_location, &fallback_path)
+                    .await?
+            }
+        };
 
         Ok(response_json::Response {
             symbols_last_modified: None,

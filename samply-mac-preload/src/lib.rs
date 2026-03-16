@@ -13,6 +13,7 @@ use mach_ipc::{channel, mach_task_self, OsIpcChannel, OsIpcSender};
 extern "C" {
     fn open(path: *const c_char, flags: c_int, mode: mode_t) -> c_int;
     fn fopen(filename: *const c_char, mode: *const c_char) -> *mut FILE;
+    fn _NSGetExecutablePath(buf: *mut c_char, bufsize: *mut u32) -> c_int;
 }
 
 static CHANNEL_SENDER: spin::Mutex<Option<OsIpcSender>> = spin::Mutex::new(None);
@@ -35,7 +36,35 @@ static __SETUP_SAMPLY_CONNECTION: unsafe extern "C" fn() = {
     __load_samply_lib
 };
 
+/// Check if this process is a system service that should not be profiled.
+/// The preload library can end up in XPC services (e.g. MTLCompilerService) via
+/// __XPC_DYLD_INSERT_LIBRARIES. Attempting Mach port operations in these restricted
+/// system processes can violate Mach port guards and crash them, so we bail out early.
+fn is_system_service() -> bool {
+    let mut buf = [0u8; 1024];
+    let mut bufsize: u32 = buf.len() as u32;
+    let ret = unsafe { _NSGetExecutablePath(buf.as_mut_ptr() as *mut c_char, &mut bufsize) };
+    if ret != 0 {
+        // Buffer too small or call failed — be conservative and skip initialization.
+        return true;
+    }
+    let path = match CStr::from_bytes_until_nul(&buf) {
+        Ok(cstr) => match cstr.to_str() {
+            Ok(s) => s,
+            Err(_) => return true,
+        },
+        Err(_) => return true,
+    };
+    path.starts_with("/usr/libexec/")
+        || path.starts_with("/System/Library/")
+        || path.starts_with("/Library/Apple/")
+}
+
 fn set_up_samply_connection() -> Option<()> {
+    if is_system_service() {
+        return None;
+    }
+
     let (tx0, rx0) = channel().ok()?;
     // Safety:
     // - b"SAMPLY_BOOTSTRAP_SERVER_NAME\0" is a nul-terminated c string
