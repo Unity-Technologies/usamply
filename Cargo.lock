@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "usamply"
-version = "0.13.3-mac-skip-system-processes-two"
+version = "0.13.3-mac-skip-system-processes-three"
 dependencies = [
  "bitflags",
  "byteorder",
