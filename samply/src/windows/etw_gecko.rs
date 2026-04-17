@@ -55,6 +55,8 @@ pub fn process_etl_files(
         }
     }
 
+    core_clr_context.log_event_summary();
+
     log::info!(
         "Took {} seconds",
         (Instant::now() - processing_start_timestamp).as_secs_f32()
@@ -78,6 +80,10 @@ fn process_trace(
 
     // Cache for Chrome measure names by (tid, traceId).
     let mut measure_name_cache: HashMap<(u32, u64), String> = HashMap::new();
+
+    let mut dotnet_events_total: u64 = 0;
+    let mut dotnet_events_no_process: HashMap<u32, u64> = HashMap::new();
+    let mut dotnet_events_processed: u64 = 0;
 
     open_trace(etl_file, |e| {
         let Ok(s) = schema_locator.event_schema(e) else {
@@ -558,10 +564,13 @@ fn process_trace(
                 );
             }
             dotnet_event if dotnet_event.starts_with("Microsoft-Windows-DotNETRuntime") => {
+                dotnet_events_total += 1;
                 let pid = s.process_id();
                 if !context.has_process_at_time(pid, timestamp_raw) {
+                    *dotnet_events_no_process.entry(pid).or_insert(0) += 1;
                     return;
                 }
+                dotnet_events_processed += 1;
                 let is_in_range = context.is_in_time_range(timestamp_raw);
                 // Note: No "/" at end of event name, because we want DotNETRuntimeRundown as well
                 coreclr::handle_coreclr_event(
@@ -586,5 +595,24 @@ fn process_trace(
                 context.handle_unknown_event(timestamp_raw, tid, task_and_op, text);
             }
         }
-    })
+    })?;
+
+    if dotnet_events_total > 0 {
+        log::info!(
+            "DotNETRuntime events in {:?}: {} total, {} processed, {} dropped (no matching process)",
+            etl_file.file_name().unwrap_or_default(),
+            dotnet_events_total,
+            dotnet_events_processed,
+            dotnet_events_total - dotnet_events_processed,
+        );
+        if !dotnet_events_no_process.is_empty() {
+            let mut pids: Vec<_> = dotnet_events_no_process.into_iter().collect();
+            pids.sort_by(|a, b| b.1.cmp(&a.1));
+            for (pid, count) in &pids {
+                log::info!("  PID {}: {} DotNETRuntime events dropped (process not tracked)", pid, count);
+            }
+        }
+    }
+
+    Ok(())
 }

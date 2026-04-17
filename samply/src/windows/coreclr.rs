@@ -27,6 +27,7 @@ pub struct CoreClrContext {
     last_marker_on_thread: HashMap<u32, (ThreadHandle, MarkerHandle)>,
     gc_markers_on_thread: HashMap<u32, HashMap<&'static str, SavedMarkerInfo>>,
     unknown_event_markers: bool,
+    event_name_counts: HashMap<String, u64>,
 }
 
 impl CoreClrContext {
@@ -36,6 +37,19 @@ impl CoreClrContext {
             last_marker_on_thread: HashMap::new(),
             gc_markers_on_thread: HashMap::new(),
             unknown_event_markers: profile_creation_props.unknown_event_markers,
+            event_name_counts: HashMap::new(),
+        }
+    }
+
+    pub fn log_event_summary(&self) {
+        if self.event_name_counts.is_empty() {
+            return;
+        }
+        let mut counts: Vec<_> = self.event_name_counts.iter().collect();
+        counts.sort_by(|a, b| b.1.cmp(a.1));
+        log::info!("CoreCLR/DotNETRuntime event breakdown:");
+        for (name, count) in counts {
+            log::info!("  {}: {}", name, count);
         }
     }
 
@@ -369,8 +383,10 @@ pub fn handle_coreclr_event(
 
     let mut name_parts = s.name().splitn(3, '/');
     let provider = name_parts.next().unwrap();
-    let task = name_parts.next().unwrap();
-    let opcode = name_parts.next().unwrap();
+    let task = name_parts.next().unwrap().trim();
+    let opcode = name_parts.next().unwrap().trim();
+
+    *coreclr_context.event_name_counts.entry(format!("{task}/{opcode}")).or_insert(0) += 1;
 
     match provider {
         "Microsoft-Windows-DotNETRuntime" | "Microsoft-Windows-DotNETRuntimeRundown" => {}
@@ -396,17 +412,17 @@ pub fn handle_coreclr_event(
     // If we get a non-stackwalk event followed by a non-stackwalk event for a given thread,
     // clear out any marker that may have been created to make sure the stackwalk doesn't
     // get attached to the wrong thing.
-    if (task, opcode) != ("CLRStack", "CLRStackWalk") {
+    if !matches!((task, opcode), ("CLRStack" | "Stack", "CLRStackWalk" | "StackWalk")) {
         coreclr_context.remove_last_event_for_thread(tid);
     }
 
     match (task, opcode) {
-        ("CLRMethod" | "CLRMethodRundown", method_event) => {
+        ("CLRMethod" | "CLRMethodRundown" | "Method" | "MethodRundown", method_event) => {
             match method_event {
             // there's MethodDCStart & MethodDCStartVerbose & MethodLoad
             // difference between *Verbose and not, is Verbose includes the names
 
-            "MethodLoadVerbose" | "MethodDCStartVerbose"
+            "MethodLoadVerbose" | "MethodDCStartVerbose" | "LoadVerbose" | "DCStartVerbose"
             // | "R2RGetEntryPoint" // not sure we need this? R2R methods should be covered by PDB files
             => {
                 // R2RGetEntryPoint shares a lot of fields with MethodLoadVerbose
@@ -485,7 +501,7 @@ pub fn handle_coreclr_event(
 
             //eprintln!("Type/BulkType count: {} user_buffer size: {} values len: {}", count, s.user_buffer().len(), values.len());
         }
-        ("CLRStack", "CLRStackWalk") => {
+        ("CLRStack" | "Stack", "CLRStackWalk" | "StackWalk") => {
             if !is_in_time_range {
                 return;
             }

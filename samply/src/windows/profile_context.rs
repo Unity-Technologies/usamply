@@ -741,8 +741,10 @@ impl ProfileContext {
         cmdline: String,
     ) {
         if !self.is_interesting_process(pid, Some(parent_pid), Some(&image_file_name)) {
+            log::debug!("Process DCStart filtered out: pid={} ppid={} image={}", pid, parent_pid, image_file_name);
             return;
         }
+        log::info!("Tracking process (DCStart): pid={} ppid={} image={}", pid, parent_pid, image_file_name);
 
         let timestamp = self.timestamp_converter.convert_time(timestamp_raw);
         let name = self.make_process_name(&image_file_name, &cmdline);
@@ -783,8 +785,10 @@ impl ProfileContext {
         self.processes.notify_process_created(pid, timestamp_raw);
 
         if !self.is_interesting_process(pid, Some(parent_pid), Some(&image_file_name)) {
+            log::debug!("Process Start filtered out: pid={} ppid={} image={}", pid, parent_pid, image_file_name);
             return;
         }
+        log::info!("Tracking process (Start): pid={} ppid={} image={}", pid, parent_pid, image_file_name);
 
         let timestamp = self.timestamp_converter.convert_time(timestamp_raw);
 
@@ -1774,8 +1778,17 @@ impl ProfileContext {
         method_size: u32,
     ) {
         let Some(process) = self.processes.get_by_pid_and_timestamp(pid, timestamp_raw) else {
+            log::debug!(
+                "CoreCLR method load dropped: no process for pid {} at timestamp {} (method: {})",
+                pid, timestamp_raw, method_name
+            );
             return;
         };
+
+        log::debug!(
+            "CoreCLR JIT method: pid={} addr=0x{:x} size={} {}",
+            pid, method_start_address, method_size, method_name
+        );
 
         let lib = &mut self.coreclr_jit_lib;
         let info = LibMappingInfo::new_jit_function(lib.lib_handle(), lib.default_category(), None);
