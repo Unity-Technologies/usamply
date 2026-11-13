@@ -1,0 +1,19 @@
+# For more information about the available options please visit: http://go/catalog-info (VPN required)
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  annotations:
+    github.com/project-slug: unity/usamply
+    backstage.io/techdocs-ref: dir:.
+  name: usamply
+  description: "Unity fork of the command-line sampling profiler usamply"
+  labels:
+    costcenter: "5056"
+  links:
+    - url: https://unity.slack.com/messages/C07RG0BGXK5/
+      title: "#proj-usamply"
+      icon: chat
+spec:
+  type: cli
+  lifecycle: experimental
+  owner: unity/profiler-team

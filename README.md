@@ -1,5 +1,7 @@
 # samply
 
+Unity fork. Slack: [#proj-usamply](https://unity.slack.com/messages/C07RG0BGXK5/). [Unity Internal Developer Portal](https://developer.portal.internal.unity.com/catalog/default/component/usamply).
+
 samply is a command line CPU profiler which uses the [Firefox profiler](https://profiler.firefox.com/) as its UI.
 
 samply works on macOS, Linux, and Windows.
